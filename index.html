@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Filtres Chantier</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ======== Écran de connexion ======== -->
+<section id="login" class="login" hidden>
+  <div class="login-card">
+    <div class="login-brand"><span class="logo" aria-hidden="true"></span><div><h1 id="login-title">Filtres Chantier</h1><p id="login-chantier" class="muted"></p></div></div>
+    <form id="login-form" novalidate>
+      <div class="field"><label for="lg-id">Identifiant</label><input id="lg-id" autocomplete="username" required placeholder="ex. ahmed.magasin"></div>
+      <div class="field"><label for="lg-pw">Mot de passe</label><input id="lg-pw" type="password" autocomplete="current-password" required></div>
+      <div class="err" id="lg-err" role="alert"></div>
+      <button class="btn primary big" id="lg-btn" type="submit">Se connecter</button>
+    </form>
+    <p class="hint">Pas de compte ? Demandez-le à l'administrateur matériel. Mot de passe oublié : l'administrateur peut le réinitialiser.</p>
+  </div>
+</section>
+
+<!-- ======== Application ======== -->
+<div id="app" class="shell" hidden>
+  <aside class="side" id="side">
+    <div class="side-brand"><span class="logo" aria-hidden="true"></span><div><b id="app-title">Filtres Chantier</b><small id="app-chantier"></small></div></div>
+    <nav id="nav" aria-label="Menu principal"></nav>
+    <div class="side-foot"><span class="dot" id="sync-dot"></span><span id="sync-txt">Connexion…</span></div>
+  </aside>
+  <div class="main-col">
+    <header class="topbar">
+      <button class="burger" id="burger" aria-label="Menu">☰</button>
+      <h2 id="page-title">Tableau de bord</h2>
+      <div class="me" id="me-box"></div>
+    </header>
+    <main>
+      <div id="view-tools"></div>
+      <div id="view-body"><div class="empty">Chargement des données…</div></div>
+    </main>
+  </div>
+</div>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+<div hidden><datalist id="dl-refs"></datalist><datalist id="dl-engins"></datalist><datalist id="dl-types"></datalist><datalist id="dl-marques"></datalist></div>
+
+<script src="config.js"></script>
+<script src="vendor/supabase.js"></script>
+<script src="vendor/xlsx.full.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
