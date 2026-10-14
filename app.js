@@ -465,7 +465,8 @@ function buildRow(kind, cells, map, defCat) {
   }
   return { row, errs, warns, cat, ref };
 }
-function templateXls(kind) { const K = IMPORT[kind];
+const MODELES = { entrees: "modeles/Canevas_import_ENTREES.xlsx", sorties: "modeles/Canevas_import_SORTIES.xlsx" };
+function templateXls(kind) { if (MODELES[kind]) { const a = document.createElement("a"); a.href = MODELES[kind]; a.download = MODELES[kind].split("/").pop(); document.body.appendChild(a); a.click(); a.remove(); return; } const K = IMPORT[kind];
   const aoa = [K.cols.map(c => c[1]), ...K.example];
   const ws = XLSX.utils.aoa_to_sheet(aoa); ws["!cols"] = K.cols.map(c => ({ wch: Math.max(12, c[1].length + 2) }));
   const help = XLSX.utils.aoa_to_sheet([["Mode d'emploi"], ["1. Une ligne par mouvement. Gardez la ligne d'en-têtes telle quelle."], ["2. Catégorie : « Filtre » ou « PDR ». Vide = la catégorie choisie dans la fenêtre d'import."],
