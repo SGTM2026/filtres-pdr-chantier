@@ -724,7 +724,7 @@ async function daPdf(d) {
   await loadScript("vendor/jspdf.umd.min.js"); await loadScript("vendor/jspdf.plugin.autotable.min.js");
   const { jsPDF } = window.jspdf; const doc = new jsPDF({ unit: "mm", format: "a4" }), W = 210, L = daLines(d.id);
   doc.setFillColor(15, 76, 92); doc.rect(0, 0, W, 24, "F"); doc.setTextColor(255); doc.setFont("helvetica", "bold"); doc.setFontSize(16); doc.text("DEMANDE D'ACHAT", 14, 11);
-  doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.text([APPNAME, S.params.nom_chantier || ""].filter(Boolean).join("  -  "), 14, 18);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.text(S.params.nom_chantier || "", 14, 18);
   doc.setFont("helvetica", "bold"); doc.setFontSize(13); doc.text(d.numero ? "N° DA : " + d.numero : "N° DA : en attente", W - 14, 11, { align: "right" });
   doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.text("Réf. interne #" + d.id, W - 14, 18, { align: "right" });
   doc.setTextColor(30);
@@ -741,7 +741,7 @@ async function daPdf(d) {
     theme: "grid", margin: { left: 14, right: 14 },
     styles: { fontSize: 9.5, cellPadding: 2, lineColor: [120, 120, 120], lineWidth: 0.1, textColor: 20 }, headStyles: { fillColor: [255, 255, 0], textColor: 0, fontStyle: "bold", halign: "center" },
     columnStyles: { 0: { halign: "center", cellWidth: 20 }, 2: { cellWidth: 36 }, 3: { halign: "center", cellWidth: 20, fontStyle: "bold" }, 4: { halign: "center", cellWidth: 26, fontStyle: "bold" } } });
-  const pages = doc.getNumberOfPages(); for (let p = 1; p <= pages; p++) { doc.setPage(p); doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(120); doc.text("Édité le " + new Date().toLocaleString("fr-FR") + "  -  page " + p + "/" + pages, W / 2, 290, { align: "center" }); }
+  const pages = doc.getNumberOfPages(); for (let p = 1; p <= pages; p++) { doc.setPage(p); doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(120); doc.text("page " + p + "/" + pages, W / 2, 290, { align: "center" }); }
   doc.save("DA_" + fileSafe(d.numero || ("interne_" + d.id)) + (d.engin ? "_" + fileSafe(d.engin) : "") + ".pdf");
 }
 
