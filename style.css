@@ -153,3 +153,11 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .chk{display:flex;gap:6px;align-items:center;font-size:13px}
 tr.row-err td{background:var(--crit-soft)}
 .kpi-title{font-family:var(--f-display);font-size:18px;text-transform:uppercase;margin:6px 0 8px;display:flex;gap:8px;align-items:center}
+
+/* --- Demandes d'achat --- */
+.le table{min-width:640px}
+.le td{padding:3px 4px}
+.le input{width:100%;min-width:0;padding:6px 8px;font-size:13px}
+.le .dl-qte{text-align:right}
+.btn.small.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.imp-prev h4{margin:14px 0 6px;font-size:13px}

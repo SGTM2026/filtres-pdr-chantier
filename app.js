@@ -46,10 +46,11 @@ function catTabs(cur, withAll) {
 
 /* ---------- état ---------- */
 const S = {
-  view: "dash", uid: null, me: null, isAdmin: false, canWrite: false, lastSeen: null,
+  view: "dash", uid: null, me: null, role: "", isAdmin: false, canWrite: false, canDA: false, canCreateDA: false, canNumDA: false, lastSeen: null,
+  da: new Map(), daL: new Map(),
   engins: new Map(), depart: new Map(), entrees: new Map(), sorties: new Map(), profiles: new Map(), journal: [],
   params: { nom_chantier: "", types: [], interventions: [], ateliers: [], unites: [], seuil: 1, seuil_pdr: 1 },
-  f: { cat: "FILTRE", stockCat: "", depCat: "", stockQ: "", stockSt: "", entQ: "", entSt: "", entFrom: "", entTo: "", sorQ: "", sorFrom: "", sorTo: "", engQ: "", depQ: "", jQ: "", jUser: "", jTab: "" },
+  f: { cat: "FILTRE", stockCat: "", depCat: "", stockQ: "", stockSt: "", entQ: "", entSt: "", entFrom: "", entTo: "", sorQ: "", sorFrom: "", sorTo: "", engQ: "", depQ: "", jQ: "", jUser: "", jTab: "", daQ: "", sdaQ: "", sdaFrom: "", sdaTo: "" },
   selEngin: "", selRef: "", loaded: false
 };
 let C = null;
@@ -112,20 +113,22 @@ function who(id) { if (!id) return '<span class="muted">Import initial</span>'; 
 const NAV = [
   ["Pilotage", [["dash", "Tableau de bord"], ["journal", "Journal d'activité"]]],
   ["Magasin", [["stock", "Stock actuel"], ["entrees", "Entrées (BC / BL)"], ["sorties", "Sorties"]]],
+  ["Achats", [["da", "Création DA", "da"], ["suivida", "Suivi DA", "da"]]],
   ["Recherche", [["engin", "Suivi par engin"], ["ref", "Recherche référence"]]],
   ["Référentiel", [["engins", "Engins"], ["depart", "Stock de départ"], ["params", "Paramètres"]]],
   ["Administration", [["users", "Utilisateurs", true], ["compte", "Mon compte"]]]
 ];
 let navHtml = "";
 function renderNav() {
-  const att = C ? C.ent.filter(e => e.reste > 0).length : 0, news = newsList().length;
-  const html = NAV.map(([g, items]) => { const it = items.filter(i => !i[2] || S.isAdmin); if (!it.length) return "";
+  const att = C ? C.ent.filter(e => e.reste > 0).length : 0, news = newsList().length, daN = S.canDA ? daPending().length : 0;
+  const html = NAV.map(([g, items]) => { const it = items.filter(i => !i[2] || (i[2] === "da" ? S.canDA : S.isAdmin)); if (!it.length) return "";
     return '<div class="nav-g">' + g + "</div>" + it.map(([k, l]) => '<button class="nav-i" data-view="' + k + '"' + (S.view === k ? ' aria-current="page"' : "") + "><span>" + l + "</span>" +
-      (k === "entrees" && att ? '<span class="badge" title="Lignes de BC non livrées">' + att + "</span>" : "") + (k === "dash" && news ? '<span class="badge" title="Nouveautés">' + news + "</span>" : "") + "</button>").join(""); }).join("");
+      (k === "entrees" && att ? '<span class="badge" title="Lignes de BC non livrées">' + att + "</span>" : "") + (k === "dash" && news ? '<span class="badge" title="Nouveautés">' + news + "</span>" : "") + (k === "da" && daN ? '<span class="badge" title="DA en attente du N° DA">' + daN + "</span>" : "") + "</button>").join(""); }).join("");
   if (html !== navHtml) { $("#nav").innerHTML = html; navHtml = html; }
 }
 $("#nav").addEventListener("click", e => { const b = e.target.closest("[data-view]"); if (!b) return; go(b.dataset.view); });
 $("#burger").addEventListener("click", () => $("#side").classList.toggle("open"));
+document.addEventListener("click", e => { const b = e.target.closest("[data-view-go]"); if (b) go(b.dataset.viewGo); });
 function go(v) { S.view = v; try { localStorage.setItem("fc-view", v); } catch (_) {} $("#side").classList.remove("open"); render(true); }
 /* onglets de catégorie */
 document.addEventListener("click", e => { const b = e.target.closest("[data-cat]"); if (!b || !$("#view-tools").contains(b)) return; const c = b.dataset.cat;
@@ -163,7 +166,7 @@ const sumStock = L => L.reduce((t, l) => t + Math.max(0, l.stock), 0);
 const monthStart = () => today().slice(0, 8) + "01";
 
 /* ---------- journal / nouveautés ---------- */
-const TABLE_FR = { entrees: "Entrée", sorties: "Sortie", stock_depart: "Stock de départ", engins: "Engin", params: "Paramètres" };
+const TABLE_FR = { entrees: "Entrée", sorties: "Sortie", stock_depart: "Stock de départ", engins: "Engin", params: "Paramètres", da: "Demande d'achat" };
 const ACT_FR = { insert: "a ajouté", update: "a modifié", delete: "a supprimé" };
 const jText = j => (ACT_FR[j.action] || j.action) + " · " + (TABLE_FR[j.table_name] || j.table_name) + " : " + (j.resume || "");
 function newsList() { if (!S.loaded) return []; const since = S.lastSeen || new Date(Date.now() - 7 * 864e5).toISOString(); return S.journal.filter(j => j.at > since && j.user_id !== S.uid); }
@@ -179,7 +182,8 @@ VIEWS.dash = { title: "Tableau de bord", body() {
     const reste = att.filter(e => e.cat === cat).reduce((t, e) => t + e.reste, 0), mois = C.sor.filter(s => s.cat === cat && (s.date || "") >= m0).reduce((t, s) => t + N(s.qte), 0);
     return '<h3 class="kpi-title">' + catPill(cat) + " " + CATS[cat].label + '</h3><div class="kpis">' + kpi(CATS[cat].label + " en stock", nb(sumStock(L))) + kpi("Lignes de stock", nb(L.length)) + kpi("En rupture", nb(rup), "crit") +
       kpi("En alerte", nb(al), "warn") + kpi("Commandés non livrés", nb(reste), "acc") + kpi("Sortis ce mois", nb(mois)) + "</div>"; };
-  let h = row("FILTRE") + row("PDR");
+  const daN = S.canNumDA ? daPending().length : 0;
+  let h = (daN ? '<div class="banner crit">🔔 ' + daN + " demande(s) d'achat en attente du N° DA. <button class=\"btn small\" data-view-go=\"da\">Ouvrir « Création DA »</button></div>" : "") + row("FILTRE") + row("PDR");
   h += '<div class="panel"><h3>Nouveautés ' + (S.lastSeen ? "depuis votre dernière visite <small>(" + fDT(S.lastSeen) + ")</small>" : "<small>des 7 derniers jours</small>") + '<button class="btn small" data-act="seen" style="margin-left:auto">Marquer comme lu</button></h3>' +
     (news.length ? '<div class="banner info">' + news.length + " action(s) de l'équipe.</div>" + feed(news.slice(0, 40)) : '<div class="empty">Aucune nouvelle action de l\'équipe.</div>') + "</div>";
   h += '<div class="grid2"><div class="panel"><h3>Activité récente <small>toute l\'équipe</small></h3>' + feed(S.journal.slice(0, 20)) + "</div>";
@@ -298,13 +302,13 @@ VIEWS.params = { title: "Paramètres", body() { const P = S.params, ro = S.isAdm
     '<div class="field"><label for="pa-seuilp">Seuil d\'alerte par défaut – PDR</label><input id="pa-seuilp" type="number" min="0" step="1" value="' + esc(P.seuil_pdr ?? 1) + '"' + ro + '></div><div class="hint full">Une ligne passe en ALERTE quand stock ≤ seuil, sauf seuil propre saisi dans le stock de départ.</div></div>' +
     (S.isAdmin ? '<div class="actions"><button class="btn primary" data-act="save-params">Enregistrer les paramètres</button></div>' : '<p class="hint">Modification réservée aux administrateurs.</p>') + "</div>"; } };
 
-const ROLE_FR = { admin: "Administrateur", saisie: "Saisie", consultation: "Consultation" };
+const ROLE_FR = { admin: "Administrateur", gestionnaire: "Gestionnaire", magasinier: "Magasinier", saisie: "Saisie", consultation: "Consultation" };
 VIEWS.users = { title: "Utilisateurs",
   tools: () => '<div class="tools"><span class="grow muted">Créez les comptes de l\'équipe : identifiant + mot de passe, et le rôle de chacun.</span><button class="btn primary" data-act="new-user">+ Nouveau compte</button></div>',
   body() { if (!S.isAdmin) return '<div class="empty">Réservé aux administrateurs.</div>';
     const act = new Map(); for (const j of S.journal) { if (!j.user_id) continue; const o = act.get(j.user_id) || { n: 0, last: "" }; o.n++; if (j.at > o.last) o.last = j.at; act.set(j.user_id, o); }
     const r = [...S.profiles.values()].sort((a, b) => (a.nom || "").localeCompare(b.nom || ""));
-    return '<div class="panel"><h3>Rôles</h3><p class="muted" style="margin:0"><b>Administrateur</b> : tout (comptes, engins, stock de départ, paramètres, saisies de tous) · <b>Saisie</b> : entrées et sorties (filtres et PDR), modifie les siennes · <b>Consultation</b> : lecture seule.</p></div>' + table([
+    return '<div class="panel"><h3>Rôles</h3><p class="muted" style="margin:0"><b>Administrateur</b> : tout (comptes, engins, stock de départ, paramètres, saisies de tous, demandes d\'achat) · <b>Gestionnaire</b> : crée les demandes d\'achat (DA) et consulte le stock · <b>Magasinier</b> : saisit le N° des DA, entrées et sorties · <b>Saisie</b> : entrées et sorties (filtres et PDR), modifie les siennes · <b>Consultation</b> : lecture seule (sans les DA).</p></div>' + table([
       { h: "Nom", f: p => who(p.id) }, { h: "Identifiant", f: p => mono(p.identifiant) }, { h: "Fonction", f: p => esc(p.fonction) }, { h: "Rôle", f: p => '<span class="role ' + (p.role === "admin" ? "admin" : "") + '">' + esc(ROLE_FR[p.role] || p.role) + "</span>" },
       { h: "État", f: p => p.actif ? '<span class="pill p-ok">Actif</span>' : '<span class="pill p-crit">Désactivé</span>' }, { h: "Actions (récentes)", n: 1, f: p => nb((act.get(p.id) || {}).n || 0) }, { h: "Dernière action", f: p => fDT((act.get(p.id) || {}).last) },
       { h: "Dernière visite", f: p => fDT(p.last_seen) }, { h: "", f: p => '<div class="rowact"><button class="btn small" data-act="edit-user" data-id="' + esc(p.id) + '">Modifier</button><button class="btn small" data-act="pw-user" data-id="' + esc(p.id) + '">Mot de passe</button></div>' }], r, { empty: "Aucun compte." }); } };
@@ -533,10 +537,233 @@ function pwForm(id) { const p = S.profiles.get(id); if (!p) return;
     await adminCall({ action: "reset_password", id, password: pw }); toast("Mot de passe changé. Transmettez-le à la personne."); }, "Changer le mot de passe"); }
 function confirmBox(text, onYes) { modal("Confirmer", "<p>" + esc(text) + "</p>", async () => { await onYes(); }, "Supprimer"); }
 
+/* =====================================================================
+   DEMANDES D'ACHAT (DA) : création, numérotation par le magasinier, suivi
+   ===================================================================== */
+const mapDA = r => ({ id: r.id, date: r.date_da || "", engin: r.engin || "", objet: r.objet || "", statut: r.statut, numero: r.numero_da || "", numAt: r.numero_at, numBy: r.numero_by, createdAt: r.created_at, createdBy: r.created_by });
+const mapDL = r => ({ id: r.id, da: r.da_id, poste: r.poste || "", designation: r.designation || "", ref: r.ref || "", qte: r.qte, engin: r.engin || "", obs: r.obs || "" });
+const daLines = id => [...S.daL.values()].filter(l => l.da === id).sort((a, b) => a.id - b.id);
+const daLabel = d => d.numero ? "DA " + d.numero : "Demande #" + d.id;
+const canEditDA = d => d.statut === "en_attente" && (S.isAdmin || (S.role === "gestionnaire" && d.createdBy === S.uid));
+const daPending = () => [...S.da.values()].filter(d => d.statut === "en_attente");
+const enginTxt = code => { if (!code) return ""; const e = S.engins.get(String(code)); return e ? [e.designation, e.marque, e.modele].filter(Boolean).join(" ") : ""; };
+const daPill = d => d.statut === "numerotee" ? '<span class="pill p-ok">N° ' + esc(d.numero) + "</span>" : '<span class="pill p-warn">En attente du N° DA</span>';
+
+function daActs(d, where) {
+  let h = '<button class="btn small" data-act="da-view" data-id="' + d.id + '">Voir</button>';
+  if (where === "suivi") h += '<button class="btn small" data-act="da-pdf" data-id="' + d.id + '">PDF</button><button class="btn small" data-act="da-xls" data-id="' + d.id + '">Excel</button>';
+  if (S.canNumDA && d.statut === "en_attente") h += '<button class="btn small primary" data-act="da-num" data-id="' + d.id + '">Saisir N° DA</button>';
+  if (S.canNumDA && d.statut === "numerotee" && where === "suivi") h += '<button class="btn small" data-act="da-num" data-id="' + d.id + '">Corriger N°</button>';
+  if (canEditDA(d)) h += '<button class="btn small" data-act="da-edit" data-id="' + d.id + '">Modifier</button><button class="btn small danger" data-act="da-del" data-id="' + d.id + '">Suppr.</button>';
+  return '<div class="rowact">' + h + "</div>";
+}
+function daCols(where) {
+  const cols = [];
+  if (where === "suivi") cols.push({ h: "N° DA", f: d => "<b>" + mono(d.numero) + "</b>" });
+  cols.push({ h: "Réf. interne", f: d => mono("#" + d.id) }, { h: "Date DA", f: d => fD(d.date) }, { h: "Engin", f: d => d.engin ? mono(d.engin) + ' <span class="muted">' + esc(enginTxt(d.engin)) + "</span>" : '<span class="muted">Plusieurs / non précisé</span>' },
+    { h: "Objet", f: d => esc(d.objet) }, { h: "Lignes", n: 1, f: d => nb(daLines(d.id).length) }, { h: "Qté totale", n: 1, f: d => nb(daLines(d.id).reduce((t, l) => t + N(l.qte), 0)) }, { h: "Demandeur", f: d => who(d.createdBy) }, { h: "Créée le", f: d => fDT(d.createdAt) });
+  if (where === "suivi") cols.push({ h: "N° saisi par", f: d => who(d.numBy) }, { h: "le", f: d => fDT(d.numAt) });
+  else cols.push({ h: "Statut", f: d => daPill(d) });
+  cols.push({ h: "", f: d => daActs(d, where) });
+  return cols;
+}
+const daMatch = (d, q) => !q || norm([d.id, d.numero, d.engin, enginTxt(d.engin), d.objet, nameOf(d.createdBy), ...daLines(d.id).map(l => l.ref + " " + l.designation + " " + l.engin)].join(" ")).includes(q);
+
+VIEWS.da = { title: "Création DA",
+  tools: () => '<div class="tools">' + searchF("da-q", S.f.daQ, "N°, engin, référence, désignation…") + '<span class="grow"></span>' +
+    (("Notification" in window) && Notification.permission === "default" && S.canNumDA ? '<button class="btn" data-act="da-notif">Activer les notifications</button>' : "") +
+    (S.canCreateDA ? '<button class="btn" data-act="da-tpl">Télécharger le canevas DA</button><button class="btn" data-act="da-imp">Importer Excel</button><button class="btn primary" data-act="da-new">+ Nouvelle demande d\'achat</button>' : "") + "</div>",
+  bind() { $("#da-q").oninput = e => { S.f.daQ = e.target.value; render(); }; },
+  body() { if (!S.canDA) return '<div class="empty">Réservé aux administrateurs, gestionnaires et magasiniers.</div>';
+    const q = norm(S.f.daQ), pend = daPending().filter(d => daMatch(d, q)).sort((a, b) => b.id - a.id);
+    let h = "";
+    if (S.canNumDA) h += pend.length ? '<div class="banner crit">🔔 ' + pend.length + " demande(s) d'achat en attente de votre numéro de DA. Cliquez « Saisir N° DA » : la demande passe alors dans « Suivi DA ».</div>" : '<div class="banner ok">✔ Aucune demande d\'achat en attente de numéro.</div>';
+    else h += '<div class="banner info">Créez la demande (ou importez votre tableau) : le magasinier et l\'administrateur sont notifiés, puis le magasinier saisit le N° de DA et la demande passe dans « Suivi DA ».</div>';
+    h += '<div class="panel"><h3>Demandes en attente du N° DA <small>' + pend.length + "</small></h3>" + table(daCols("crea"), pend, { empty: "Aucune demande en attente." }) + "</div>";
+    if (S.role === "gestionnaire") { const mine = [...S.da.values()].filter(d => d.createdBy === S.uid && d.statut === "numerotee").sort((a, b) => (b.numAt || "").localeCompare(a.numAt || "")).slice(0, 10);
+      h += '<div class="panel"><h3>Mes dernières demandes numérotées</h3>' + table([{ h: "N° DA", f: d => "<b>" + mono(d.numero) + "</b>" }, { h: "Date DA", f: d => fD(d.date) }, { h: "Engin", f: d => mono(d.engin) }, { h: "Objet", f: d => esc(d.objet) }, { h: "Numérotée le", f: d => fDT(d.numAt) }, { h: "", f: d => daActs(d, "suivi") }], mine, { empty: "Aucune pour l'instant." }) + "</div>"; }
+    return h; } };
+
+VIEWS.suivida = { title: "Suivi DA",
+  tools: () => '<div class="tools">' + searchF("sda-q", S.f.sdaQ, "N° DA, engin, référence…") + field("sda-f", "Du", '<input id="sda-f" type="date" value="' + esc(S.f.sdaFrom) + '">') + field("sda-t", "Au", '<input id="sda-t" type="date" value="' + esc(S.f.sdaTo) + '">') +
+    '<span class="grow"></span><button class="btn" data-act="da-xls-all">Exporter la liste (Excel)</button></div>',
+  bind() { ["sda-q", "sda-f", "sda-t"].forEach(id => $("#" + id).addEventListener(id === "sda-q" ? "input" : "change", () => { S.f.sdaQ = $("#sda-q").value; S.f.sdaFrom = $("#sda-f").value; S.f.sdaTo = $("#sda-t").value; render(); })); },
+  rows() { const q = norm(S.f.sdaQ); return [...S.da.values()].filter(d => d.statut === "numerotee" && inPeriod(d.date, S.f.sdaFrom, S.f.sdaTo) && daMatch(d, q)).sort((a, b) => (b.numAt || "").localeCompare(a.numAt || "") || b.id - a.id); },
+  body() { if (!S.canDA) return '<div class="empty">Réservé aux administrateurs, gestionnaires et magasiniers.</div>';
+    const r = this.rows(); const lines = r.reduce((t, d) => t + daLines(d.id).length, 0);
+    return '<div class="more">' + r.length + " demande(s) numérotée(s) · " + lines + " ligne(s). Téléchargez chaque DA en PDF ou en Excel (format du canevas).</div>" + table(daCols("suivi"), r, { empty: "Aucune demande numérotée." }); } };
+
+/* ---------- formulaire DA ---------- */
+const lineRow = (l, i) => '<tr data-i="' + i + '"><td><input class="dl-poste" value="' + esc(l.poste) + '"></td><td><input class="dl-des" list="dl-types" value="' + esc(l.designation) + '"></td><td><input class="dl-ref" list="dl-refs" value="' + esc(l.ref) + '"></td>' +
+  '<td><input class="dl-qte" type="number" min="0" step="any" value="' + esc(l.qte ?? "") + '"></td><td><input class="dl-eng" list="dl-engins" value="' + esc(l.engin) + '"></td><td><button type="button" class="btn small danger dl-del" title="Retirer la ligne">×</button></td></tr>';
+function daForm(d) {
+  const isNew = !d; d = d || { date: today(), engin: "", objet: "" };
+  const L = isNew ? [] : daLines(d.id); while (L.length < (isNew ? 5 : Math.max(1, L.length))) L.push({ poste: "", designation: "", ref: "", qte: "", engin: "" });
+  const html = '<div class="fgrid">' + F("d-date", "Date de la DA *", '<input id="d-date" type="date" value="' + esc(d.date) + '">') + F("d-eng", "Engin principal (facultatif)", '<input id="d-eng" list="dl-engins" value="' + esc(d.engin) + '" placeholder="ex. 31549"><div class="hint">Repris dans les lignes sans Code_Engin.</div>') +
+    F("d-obj", "Objet / observations", '<input id="d-obj" value="' + esc(d.objet) + '" placeholder="ex. Révision 500 h">', "full") + "</div>" +
+    '<div class="tw le"><table><thead><tr><th style="width:90px">N° Poste</th><th>Désignation Catalogue</th><th style="width:150px">Référence</th><th style="width:90px">Quantité *</th><th style="width:110px">Code_Engin</th><th style="width:40px"></th></tr></thead><tbody id="dl-body">' + L.map(lineRow).join("") + "</tbody></table></div>" +
+    '<div class="actions" style="justify-content:flex-start;margin-top:8px"><button type="button" class="btn small" id="dl-add">+ Ajouter une ligne</button><span class="hint">Une ligne = un article. Les lignes vides sont ignorées.</span></div>';
+  const ov = modal(isNew ? "Nouvelle demande d'achat" : "Modifier la demande #" + d.id, html, async ov => {
+    const date = fv(ov, "d-date"), eng = fv(ov, "d-eng"), objet = fv(ov, "d-obj");
+    if (!date) return "Saisissez la date de la DA."; if (eng && !S.engins.has(eng)) return "Engin principal " + eng + " inconnu.";
+    const rows = [], errs = [];
+    ov.querySelectorAll("#dl-body tr").forEach((tr, k) => { const g = c => tr.querySelector(c).value.trim(); const poste = g(".dl-poste"), des = g(".dl-des"), ref = g(".dl-ref"), qs = g(".dl-qte"), le = g(".dl-eng") || eng;
+      if (!poste && !des && !ref && !qs && !g(".dl-eng")) return; const q = +qs.replace(",", ".");
+      if (!des && !ref) errs.push("ligne " + (k + 1) + " : désignation ou référence manquante"); if (!(q > 0)) errs.push("ligne " + (k + 1) + " : quantité invalide"); if (le && !S.engins.has(le)) errs.push("ligne " + (k + 1) + " : engin " + le + " inconnu");
+      rows.push({ poste: poste || null, designation: des || null, ref: ref || null, qte: q, engin: le || null }); });
+    if (errs.length) return errs.slice(0, 4).join(" · "); if (!rows.length) return "Ajoutez au moins une ligne.";
+    if (isNew) { const r = await must(sb.from("da").insert({ date_da: date, engin: eng || null, objet: objet || null }).select().single());
+      try { const ls = await must(sb.from("da_lignes").insert(rows.map(x => Object.assign({ da_id: r.id }, x))).select()); S.da.set(r.id, mapDA(r)); ls.forEach(l => S.daL.set(l.id, mapDL(l))); }
+      catch (e) { await sb.from("da").delete().eq("id", r.id); throw e; }
+      schedule(); toast("Demande d'achat #" + r.id + " créée (" + rows.length + " ligne(s)). Le magasinier et l'administrateur sont notifiés."); return; }
+    const r = await must(sb.from("da").update({ date_da: date, engin: eng || null, objet: objet || null }).eq("id", d.id).select().single());
+    await must(sb.from("da_lignes").delete().eq("da_id", d.id)); daLines(d.id).forEach(l => S.daL.delete(l.id));
+    const ls = await must(sb.from("da_lignes").insert(rows.map(x => Object.assign({ da_id: d.id }, x))).select());
+    S.da.set(r.id, mapDA(r)); ls.forEach(l => S.daL.set(l.id, mapDL(l))); schedule(); toast("Demande #" + d.id + " modifiée."); }, isNew ? "Créer la demande" : "Enregistrer", true);
+  const body = ov.querySelector("#dl-body"); let n = L.length;
+  ov.querySelector("#dl-add").onclick = () => { body.insertAdjacentHTML("beforeend", lineRow({ poste: "", designation: "", ref: "", qte: "", engin: "" }, n++)); };
+  body.addEventListener("click", e => { const b = e.target.closest(".dl-del"); if (b) { if (body.children.length > 1) b.closest("tr").remove(); else b.closest("tr").querySelectorAll("input").forEach(i => i.value = ""); } });
+  body.addEventListener("change", e => { if (!e.target.classList.contains("dl-ref")) return; const tr = e.target.closest("tr"), des = tr.querySelector(".dl-des"); if (!des.value.trim() && C) { const i = C.info(e.target.value.trim()); if (i && i.type) des.value = i.type; } });
+}
+
+function daNumForm(d) {
+  modal((d.numero ? "Corriger le N° de DA – " : "Saisir le N° de DA – ") + "demande #" + d.id, '<p class="muted" style="margin-top:0">' + esc([fD(d.date), d.engin && ("engin " + d.engin), d.objet, daLines(d.id).length + " ligne(s)", "demandeur : " + nameOf(d.createdBy)].filter(Boolean).join(" · ")) + "</p>" +
+    F("n-num", "N° de DA *", '<input id="n-num" value="' + esc(d.numero) + '" placeholder="ex. 4500012345" autocomplete="off">') + '<div class="hint">Après validation, la demande passe dans « Suivi DA » et le demandeur est notifié.</div>',
+    async ov => { const num = fv(ov, "n-num"); if (!num) return "Saisissez le numéro de DA.";
+      const dup = [...S.da.values()].find(x => x.numero === num && x.id !== d.id); if (dup) return "Ce N° de DA est déjà utilisé (demande #" + dup.id + ").";
+      const r = await must(sb.from("da").update({ numero_da: num }).eq("id", d.id).select().single()); S.da.set(r.id, mapDA(r)); schedule(); toast("N° DA " + num + " enregistré : la demande est dans « Suivi DA »."); }, "Valider le N° DA");
+}
+
+function daView(d) {
+  const L = daLines(d.id);
+  const html = '<div class="kpis">' + kpi("Statut", d.statut === "numerotee" ? "N° " + esc(d.numero) : "En attente", d.statut === "numerotee" ? "txt" : "warn") + kpi("Date DA", fD(d.date), "txt") + kpi("Lignes", nb(L.length)) + kpi("Qté totale", nb(L.reduce((t, l) => t + N(l.qte), 0))) + "</div>" +
+    '<p class="muted">' + (d.engin ? "Engin principal : <b>" + esc(d.engin) + "</b> " + esc(enginTxt(d.engin)) + " · " : "") + (d.objet ? "Objet : " + esc(d.objet) + " · " : "") + "Demandeur : " + esc(nameOf(d.createdBy)) + " · créée le " + fDT(d.createdAt) + (d.numAt ? " · N° saisi par " + esc(nameOf(d.numBy)) + " le " + fDT(d.numAt) : "") + "</p>" +
+    table([{ h: "N° Poste", f: l => esc(l.poste) }, { h: "Désignation Catalogue", f: l => esc(l.designation) }, { h: "Référence", f: l => mono(l.ref) }, { h: "Quantité", n: 1, f: l => "<b>" + nb(l.qte) + "</b>" }, { h: "Code_Engin", f: l => mono(l.engin) }], L, { empty: "Aucune ligne." }) +
+    '<div class="actions" style="justify-content:flex-start"><button type="button" class="btn" data-act="da-pdf" data-id="' + d.id + '">Télécharger PDF</button><button type="button" class="btn" data-act="da-xls" data-id="' + d.id + '">Télécharger Excel</button>' +
+    (S.canNumDA && d.statut === "en_attente" ? '<button type="button" class="btn primary" data-act="da-num" data-id="' + d.id + '">Saisir N° DA</button>' : "") + "</div>";
+  const ov = modal(daLabel(d), html, async () => {}, "Fermer", true); ov.querySelector("#mf-cancel").hidden = true;
+  ov.addEventListener("click", e => { if (e.target.closest("[data-act]")) ov.remove(); });
+}
+
+/* ---------- import d'un tableau de DA (canevas : Date | DA | N° Poste | Désignation Catalogue | Référance | Quantité | Code_Engin) ---------- */
+const DA_COLS = [["date", "Date", ["date", "datedemande", "dateda"]], ["num", "DA", ["da", "nda", "numda", "numeroda", "nodemandeachat", "demandeachat"]], ["poste", "N° Poste", ["nposte", "poste", "numeroposte", "noposte", "item"]],
+  ["designation", "Désignation Catalogue", ["designationcatalogue", "designation", "libelle", "article", "description"]], ["ref", "Référance", ["referance", "reference", "ref", "codearticle", "refpiece", "referencefiltre"]],
+  ["qte", "Quantité", ["quantite", "qte", "qtedemandee", "quantitedemandee"]], ["engin", "Code_Engin", ["codeengin", "engin", "codeengins", "enginconcerne"]]];
+function daImportDialog() {
+  if (!S.canCreateDA) { toast("Seuls l'administrateur et le gestionnaire créent des demandes d'achat."); return; }
+  let groups = [];
+  const html = '<p class="muted" style="margin-top:0">Choisissez votre tableau de demande d\'achat (.xlsx, .xls ou .csv) au format du canevas : <b>Date · DA · N° Poste · Désignation Catalogue · Référance · Quantité · Code_Engin</b>. Chaque feuille devient une demande ; si la colonne DA contient plusieurs numéros, une demande est créée par numéro.</p>' +
+    '<div class="tools" style="margin-bottom:8px">' + F("di-file", "Fichier", '<input id="di-file" type="file" accept=".xlsx,.xls,.xlsm,.csv">') + F("di-obj", "Objet (facultatif)", '<input id="di-obj" placeholder="ex. Commande filtres octobre">') + '<span class="grow"></span><button type="button" class="btn" data-act="da-tpl">Télécharger le canevas DA</button></div><div id="di-prev" class="imp-prev"></div>';
+  const ov = modal("Importer un tableau de demande d'achat", html, async ov => {
+    const ok = groups.filter(g => g.ok.length && !g.err); if (!ok.length) return "Aucune demande importable : corrigez le fichier.";
+    const btn = ov.querySelector("#mf-save"), objet = fv(ov, "di-obj"); let n = 0;
+    for (const g of ok) { btn.textContent = "Import… " + n + "/" + ok.length;
+      const head = { date_da: g.date, engin: g.engin || null, objet: objet || null, source: "import" }; if (g.num && S.canNumDA) head.numero_da = g.num;
+      const r = await must(sb.from("da").insert(head).select().single());
+      try { const ls = await must(sb.from("da_lignes").insert(g.ok.map(l => Object.assign({ da_id: r.id }, l))).select()); S.da.set(r.id, mapDA(r)); ls.forEach(l => S.daL.set(l.id, mapDL(l))); }
+      catch (e) { await sb.from("da").delete().eq("id", r.id); throw e; } n++; }
+    schedule(); toast(n + " demande(s) d'achat importée(s)." + (S.canNumDA ? "" : " Le magasinier et l'administrateur sont notifiés.")); }, "Importer", true);
+  const btn = ov.querySelector("#mf-save"); btn.disabled = true;
+  ov.querySelector("#di-file").addEventListener("change", async () => { const f = ov.querySelector("#di-file").files[0], box = ov.querySelector("#di-prev"); groups = []; btn.disabled = true; btn.textContent = "Importer"; if (!f) { box.innerHTML = ""; return; }
+    try {
+      const wb = XLSX.read(await f.arrayBuffer(), { type: "array", cellDates: true }); const used = new Set([...S.da.values()].map(d => d.numero).filter(Boolean)); const notes = [];
+      for (const sn of wb.SheetNames) { const aoa = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, defval: "", raw: true, blankrows: false });
+        const hIdx = aoa.findIndex(r => r.filter(c => String(c).trim()).length >= 2); if (hIdx < 0) continue;
+        const map = matchCols(aoa[hIdx].map(String), DA_COLS); if (!("qte" in map) || (!("ref" in map) && !("designation" in map))) { notes.push("Feuille « " + sn + " » ignorée : colonnes Quantité et Référance / Désignation introuvables."); continue; }
+        const sheetEng = S.engins.has(sn.trim()) ? sn.trim() : "", by = new Map();
+        aoa.slice(hIdx + 1).forEach((cells, i) => { if (!cells.some(c => String(c).trim() !== "")) return; const g = k => (k in map ? cells[map[k]] : "");
+          const num = pStr(g("num")), key = num || "", grp = by.get(key) || { sheet: sn, num, lines: [], dates: [] }; by.set(key, grp);
+          const dt = pDate(g("date")); if (!dt.err && !dt.warn) grp.dates.push(dt.v);
+          const q = pNum(g("qte")), ref = pStr(g("ref")), des = pStr(g("designation")), eng = pStr(g("engin")) || sheetEng, errs = [];
+          if (!ref && !des) errs.push("désignation et référence vides"); if (q === null || Number.isNaN(q) || q <= 0) errs.push("quantité invalide"); if (eng && !S.engins.has(eng)) errs.push("engin " + eng + " inconnu"); if (dt.err) errs.push(dt.err);
+          grp.lines.push({ line: hIdx + 2 + i, errs, row: { poste: pStr(g("poste")) || null, designation: des || null, ref: ref || null, qte: q, engin: eng || null } }); });
+        for (const grp of by.values()) { const engs = [...new Set(grp.lines.map(l => l.row.engin).filter(Boolean))];
+          grp.engin = engs.length === 1 ? engs[0] : sheetEng; grp.date = grp.dates.sort()[0] || today(); grp.ok = grp.lines.filter(l => !l.errs.length).map(l => l.row);
+          if (grp.num && S.canNumDA && used.has(grp.num)) grp.err = "N° DA " + grp.num + " déjà enregistré"; if (grp.num && S.canNumDA) used.add(grp.num);
+          groups.push(grp); } }
+      if (!S.canNumDA && groups.some(g => g.num)) notes.push("Les N° DA présents dans le fichier sont ignorés : ils seront saisis par le magasinier.");
+      const okG = groups.filter(g => g.ok.length && !g.err), bad = groups.flatMap(g => g.lines.filter(l => l.errs.length).map(l => Object.assign({ sheet: g.sheet }, l)));
+      box.innerHTML = (groups.length ? '<div class="banner ' + (bad.length || okG.length < groups.length ? "crit" : "ok") + '">' + groups.length + " demande(s) détectée(s) · <b>" + okG.length + " à créer</b> (" + okG.reduce((t, g) => t + g.ok.length, 0) + " ligne(s))" + (bad.length ? " · " + bad.length + " ligne(s) en erreur ignorée(s)" : "") + "</div>" : '<div class="banner crit">Aucune donnée reconnue dans ce fichier.</div>') +
+        notes.map(n => '<p class="hint">' + esc(n) + "</p>").join("") +
+        table([{ h: "Feuille", f: g => esc(g.sheet) }, { h: "N° DA (fichier)", f: g => esc(g.num || "–") }, { h: "Date", f: g => fD(g.date) }, { h: "Engin", f: g => esc(g.engin || "plusieurs") }, { h: "Lignes OK", n: 1, f: g => nb(g.ok.length) },
+          { h: "Qté", n: 1, f: g => nb(g.ok.reduce((t, l) => t + N(l.qte), 0)) }, { h: "État", f: g => g.err ? '<span class="pill p-crit">' + esc(g.err) + "</span>" : (g.ok.length ? '<span class="pill p-ok">OK</span>' : '<span class="pill p-crit">Aucune ligne valide</span>') }], groups) +
+        (bad.length ? "<h4>Lignes en erreur</h4>" + table([{ h: "Feuille", f: l => esc(l.sheet) }, { h: "Ligne", n: 1, f: l => l.line }, { h: "Référence", f: l => mono(l.row.ref) }, { h: "Désignation", f: l => esc(l.row.designation) }, { h: "Erreur", f: l => esc(l.errs.join(" · ")) }], bad, { limit: 100, rowCls: () => "row-err" }) : "");
+      btn.disabled = !okG.length; btn.textContent = okG.length ? "Créer " + okG.length + " demande(s)" : "Importer";
+    } catch (err) { box.innerHTML = '<div class="banner crit">Lecture impossible : ' + esc(err.message || err) + "</div>"; } });
+}
+
+/* ---------- exports PDF / Excel ---------- */
+const libs = {};
+function loadScript(src) { return libs[src] || (libs[src] = new Promise((ok, ko) => { const s = document.createElement("script"); s.src = src; s.onload = ok; s.onerror = () => { delete libs[src]; ko(new Error("Chargement impossible de " + src)); }; document.head.appendChild(s); })); }
+const fileSafe = s => String(s).replace(/[^\w.-]+/g, "_");
+function saveBlob(blob, name) { const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); }
+const isoToDate = iso => { if (!iso) return null; const [y, m, d] = iso.slice(0, 10).split("-").map(Number); return new Date(Date.UTC(y, m - 1, d)); };
+
+async function daExcel(list, name) {
+  await loadScript("vendor/exceljs.min.js");
+  const wb = new ExcelJS.Workbook(); wb.creator = APPNAME;
+  const one = list.length === 1, d0 = list[0];
+  const ws = wb.addWorksheet(fileSafe(one ? (d0.engin || d0.numero || "DA") : "Suivi DA").slice(0, 31), { pageSetup: { paperSize: 9, orientation: "portrait", fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
+  ws.columns = [{ width: 11 }, { width: 13 }, { width: 11 }, { width: 32.45 }, { width: 17.73 }, { width: 8.09 }, { width: 15 }];
+  const thin = { style: "thin" }, bd = { top: thin, left: thin, bottom: thin, right: thin };
+  const hr = ws.addRow(["Date", "DA", "N° Poste", "Désignation Catalogue", "Référance", "Quantité", "Code_Engin"]); hr.height = 18.9;
+  hr.eachCell(c => { c.font = { name: "Arial", size: 9, bold: true }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } }; c.border = bd; c.alignment = { horizontal: "center", vertical: "middle" }; });
+  for (const d of list) for (const l of daLines(d.id)) {
+    const num = /^\d{1,15}$/.test(d.numero) ? +d.numero : (d.numero || ""), poste = /^\d{1,9}$/.test(l.poste) ? +l.poste : l.poste, eng = /^\d{1,9}$/.test(l.engin) ? +l.engin : l.engin;
+    const r = ws.addRow([isoToDate(d.date), num, poste, l.designation, l.ref, N(l.qte), eng]);
+    r.eachCell({ includeEmpty: true }, (c, col) => { c.font = { name: "Arial", size: 10, bold: col >= 6 }; c.border = bd; c.alignment = { horizontal: [4, 5].includes(col) ? "left" : "center", vertical: "middle" }; });
+    r.getCell(1).numFmt = "dd/mm/yyyy"; }
+  ws.autoFilter = { from: "A1", to: { row: Math.max(1, ws.rowCount), column: 7 } };
+  saveBlob(new Blob([await wb.xlsx.writeBuffer()], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), name);
+}
+async function daPdf(d) {
+  await loadScript("vendor/jspdf.umd.min.js"); await loadScript("vendor/jspdf.plugin.autotable.min.js");
+  const { jsPDF } = window.jspdf; const doc = new jsPDF({ unit: "mm", format: "a4" }), W = 210, L = daLines(d.id);
+  doc.setFillColor(15, 76, 92); doc.rect(0, 0, W, 24, "F"); doc.setTextColor(255); doc.setFont("helvetica", "bold"); doc.setFontSize(16); doc.text("DEMANDE D'ACHAT", 14, 11);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.text([APPNAME, S.params.nom_chantier || ""].filter(Boolean).join("  -  "), 14, 18);
+  doc.setFont("helvetica", "bold"); doc.setFontSize(13); doc.text(d.numero ? "N° DA : " + d.numero : "N° DA : en attente", W - 14, 11, { align: "right" });
+  doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.text("Réf. interne #" + d.id, W - 14, 18, { align: "right" });
+  doc.setTextColor(30); const info = [["Date de la DA", fD(d.date)], ["Engin principal", d.engin ? d.engin + (enginTxt(d.engin) ? " - " + enginTxt(d.engin) : "") : "Plusieurs / non précisé"], ["Objet", d.objet || "-"],
+    ["Demandeur", nameOf(d.createdBy) === "Vous" ? ((S.me && S.me.nom) || "") : nameOf(d.createdBy)], ["Créée le", fDT(d.createdAt)], ["N° saisi par", d.numBy ? (d.numBy === S.uid ? ((S.me && S.me.nom) || "") : nameOf(d.numBy)) + " le " + fDT(d.numAt) : "-"]];
+  doc.autoTable({ startY: 30, body: info, theme: "plain", styles: { fontSize: 9.5, cellPadding: 1.2 }, columnStyles: { 0: { fontStyle: "bold", cellWidth: 38, textColor: [15, 76, 92] } }, margin: { left: 14, right: 14 } });
+  doc.autoTable({ startY: doc.lastAutoTable.finalY + 4, head: [["N° Poste", "Désignation Catalogue", "Référence", "Quantité", "Code_Engin"]], body: L.map(l => [l.poste, l.designation, l.ref, nb(l.qte), l.engin]),
+    foot: [["", "Total : " + L.length + " ligne(s)", "", nb(L.reduce((t, l) => t + N(l.qte), 0)), ""]], theme: "grid", margin: { left: 14, right: 14 },
+    styles: { fontSize: 9.5, cellPadding: 2, lineColor: [120, 120, 120], lineWidth: 0.1, textColor: 20 }, headStyles: { fillColor: [255, 255, 0], textColor: 0, fontStyle: "bold", halign: "center" },
+    footStyles: { fillColor: [240, 240, 240], textColor: 0, fontStyle: "bold" }, columnStyles: { 0: { halign: "center", cellWidth: 20 }, 2: { cellWidth: 36 }, 3: { halign: "center", cellWidth: 20, fontStyle: "bold" }, 4: { halign: "center", cellWidth: 26, fontStyle: "bold" } } });
+  let y = doc.lastAutoTable.finalY + 12; if (y > 250) { doc.addPage(); y = 20; }
+  const bw = (W - 28 - 8) / 3; ["Demandeur", "Magasinier", "Visa responsable"].forEach((t, i) => { const x = 14 + i * (bw + 4); doc.setDrawColor(150); doc.rect(x, y, bw, 28); doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.text(t, x + 3, y + 5); });
+  const pages = doc.getNumberOfPages(); for (let p = 1; p <= pages; p++) { doc.setPage(p); doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(120); doc.text("Édité le " + new Date().toLocaleString("fr-FR") + "  -  page " + p + "/" + pages, W / 2, 290, { align: "center" }); }
+  doc.save("DA_" + fileSafe(d.numero || ("interne_" + d.id)) + (d.engin ? "_" + fileSafe(d.engin) : "") + ".pdf");
+}
+
+/* ---------- notifications DA ---------- */
+function daNotify(title, body) { toast(title + " – " + body);
+  try { if ("Notification" in window && Notification.permission === "granted" && document.hidden) new Notification(title, { body }); } catch (_) {} }
+function onDaChange(p) {
+  const row = p.new, old = p.old;
+  if (p.eventType === "DELETE") { S.da.delete(old.id); daLines(old.id).forEach(l => S.daL.delete(l.id)); schedule(); return; }
+  const was = S.da.get(row.id); S.da.set(row.id, mapDA(row));
+  if (p.eventType === "INSERT" && row.created_by !== S.uid && S.canNumDA && row.statut === "en_attente") daNotify("🔔 Nouvelle demande d'achat", "#" + row.id + " de " + nameOf(row.created_by) + (row.engin ? " · engin " + row.engin : "") + " : à numéroter dans « Création DA ».");
+  if (p.eventType === "UPDATE" && row.numero_da && (!was || !was.numero) && row.numero_by !== S.uid && (row.created_by === S.uid || S.isAdmin)) daNotify("✔ DA numérotée", "Demande #" + row.id + " : N° DA " + row.numero_da + " saisi par " + nameOf(row.numero_by) + ". Elle est dans « Suivi DA ».");
+  schedule();
+}
+
 /* ---------- actions ---------- */
 document.addEventListener("click", async e => { const b = e.target.closest("[data-act]"); if (!b) return; const a = b.dataset.act, id = b.dataset.id;
   try {
     if (a === "new-entree") return entreeForm();
+    if (a === "da-new") return daForm(null);
+    if (a === "da-imp") return daImportDialog();
+    if (a === "da-tpl") { const l = document.createElement("a"); l.href = "modeles/Canevas_DA.xlsx"; l.download = "Canevas_DA.xlsx"; document.body.appendChild(l); l.click(); l.remove(); return; }
+    if (a === "da-notif") { await Notification.requestPermission(); render(true); return; }
+    if (a.startsWith("da-") && a !== "da-xls-all") { const d = S.da.get(+id); if (!d) return;
+      if (a === "da-view") return daView(d);
+      if (a === "da-edit") return canEditDA(d) && daForm(d);
+      if (a === "da-num") return S.canNumDA && daNumForm(d);
+      if (a === "da-del") return confirmBox("Supprimer la demande d'achat #" + d.id + " (" + daLines(d.id).length + " ligne(s)) ?", async () => { const r = await must(sb.from("da").delete().eq("id", d.id).select()); if (!r.length) throw new Error("permission denied"); S.da.delete(d.id); daLines(d.id).forEach(l => S.daL.delete(l.id)); schedule(); toast("Demande supprimée."); });
+      if (a === "da-pdf") { toast("Préparation du PDF…"); return await daPdf(d); }
+      if (a === "da-xls") return await daExcel([d], "DA_" + fileSafe(d.numero || ("interne_" + d.id)) + (d.engin ? "_" + fileSafe(d.engin) : "") + ".xlsx"); }
+    if (a === "da-xls-all") { const r = VIEWS.suivida.rows(); if (!r.length) { toast("Aucune DA à exporter."); return; } return await daExcel(r, "Suivi_DA_" + today() + ".xlsx"); }
     if (a === "new-sortie") return sortieForm();
     if (a === "imp-entrees") return importDialog("entrees");
     if (a === "imp-sorties") return importDialog("sorties");
@@ -595,18 +822,22 @@ async function startApp() {
   $("#login").hidden = true; $("#app").hidden = false; setSync(false, "Chargement…");
   await loadProfiles(); const me = S.me;
   if (!me || !me.actif) { await sb.auth.signOut(); showLogin("Ce compte n'est pas actif. Contactez l'administrateur."); return; }
-  S.isAdmin = me.role === "admin"; S.canWrite = S.isAdmin || me.role === "saisie"; S.lastSeen = me.last_seen || null;
+  S.role = me.role; S.isAdmin = me.role === "admin"; S.canWrite = S.isAdmin || me.role === "saisie" || me.role === "magasinier";
+  S.canDA = ["admin", "gestionnaire", "magasinier"].includes(me.role); S.canCreateDA = ["admin", "gestionnaire"].includes(me.role); S.canNumDA = ["admin", "magasinier"].includes(me.role); S.lastSeen = me.last_seen || null;
   $("#me-box").innerHTML = '<span class="who">' + avatar(S.uid) + '<span class="nm">' + esc(me.nom || me.identifiant) + "</span></span>" + '<span class="role ' + (S.isAdmin ? "admin" : "") + '">' + esc(ROLE_FR[me.role]) + '</span><button class="btn small" data-act="logout">Déconnexion</button>';
-  try { const v = localStorage.getItem("fc-view"); if (v && VIEWS[v] && (v !== "users" || S.isAdmin)) S.view = v; const c = localStorage.getItem("fc-cat"); if (c === "PDR" || c === "FILTRE") S.f.cat = c; } catch (_) {}
+  try { const v = localStorage.getItem("fc-view"); if (v && VIEWS[v] && (v !== "users" || S.isAdmin) && (!["da", "suivida"].includes(v) || S.canDA)) S.view = v; const c = localStorage.getItem("fc-cat"); if (c === "PDR" || c === "FILTRE") S.f.cat = c; } catch (_) {}
   const [eng, dep, ent, sor, par, jr] = await Promise.all([fetchAll("engins", "code"), fetchAll("stock_depart", "id"), fetchAll("entrees", "id"), fetchAll("sorties", "id"),
     must(sb.from("params").select("*").eq("id", 1).maybeSingle()), must(sb.from("journal").select("*").order("at", { ascending: false }).limit(1000))]);
   S.engins = new Map(eng.map(r => [String(r.code), mapG(r)])); S.depart = new Map(dep.map(r => [r.id, mapD(r)])); S.entrees = new Map(ent.map(r => [r.id, mapE(r)])); S.sorties = new Map(sor.map(r => [r.id, mapS(r)]));
   if (par) S.params = Object.assign(S.params, par); S.journal = jr; applyHeader();
+  if (S.canDA) { const [da, dl] = await Promise.all([fetchAll("da", "id"), fetchAll("da_lignes", "id")]); S.da = new Map(da.map(r => [r.id, mapDA(r)])); S.daL = new Map(dl.map(r => [r.id, mapDL(r)])); }
   S.loaded = true; compute(); fillLists(); render(true);
   sb.channel("filtres").on("postgres_changes", { event: "*", schema: "public" }, p => {
     const t = p.table, row = p.new, old = p.old;
     if (t === "journal") { if (p.eventType === "INSERT") { S.journal.unshift(row); if (S.journal.length > 1500) S.journal.length = 1500; if (row.user_id !== S.uid && (row.table_name === "entrees" || row.table_name === "sorties") && row.action === "insert") notifyInsert(row); renderNav(); if (S.view === "dash" || S.view === "journal") schedule(); } return; }
     if (t === "profiles") { loadProfiles().then(() => schedule()); return; }
+    if (t === "da") { if (S.canDA) onDaChange(p); return; }
+    if (t === "da_lignes") { if (S.canDA) { if (p.eventType === "DELETE") S.daL.delete(old.id); else S.daL.set(row.id, mapDL(row)); schedule(); } return; }
     if (t === "params") { if (row) { S.params = Object.assign(S.params, row); applyHeader(); schedule(true); } return; }
     const maps = { entrees: [S.entrees, mapE], sorties: [S.sorties, mapS], stock_depart: [S.depart, mapD] };
     if (t === "engins") { if (p.eventType === "DELETE") S.engins.delete(String(old.code)); else S.engins.set(String(row.code), mapG(row)); schedule(true); return; }
