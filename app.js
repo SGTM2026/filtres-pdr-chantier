@@ -560,8 +560,13 @@ function daActs(d, where) {
 function daCols(where) {
   const cols = [];
   if (where === "suivi") cols.push({ h: "N° DA", f: d => "<b>" + mono(d.numero) + "</b>" });
-  cols.push({ h: "Réf. interne", f: d => mono("#" + d.id) }, { h: "Date DA", f: d => fD(d.date) }, { h: "Engin", f: d => d.engin ? mono(d.engin) + ' <span class="muted">' + esc(enginTxt(d.engin)) + "</span>" : '<span class="muted">Plusieurs / non précisé</span>' },
-    { h: "Objet", f: d => esc(d.objet) }, { h: "Lignes", n: 1, f: d => nb(daLines(d.id).length) }, { h: "Qté totale", n: 1, f: d => nb(daLines(d.id).reduce((t, l) => t + N(l.qte), 0)) }, { h: "Demandeur", f: d => who(d.createdBy) }, { h: "Créée le", f: d => fDT(d.createdAt) });
+  const suivi = where === "suivi";
+  if (!suivi) cols.push({ h: "Réf. interne", f: d => mono("#" + d.id) });
+  cols.push({ h: "Date DA", f: d => fD(d.date) });
+  if (!suivi) cols.push({ h: "Engin", f: d => d.engin ? mono(d.engin) + ' <span class="muted">' + esc(enginTxt(d.engin)) + "</span>" : '<span class="muted">Plusieurs</span>' });
+  cols.push({ h: "Lignes", n: 1, f: d => nb(daLines(d.id).length) });
+  if (!suivi) cols.push({ h: "Qté totale", n: 1, f: d => nb(daLines(d.id).reduce((t, l) => t + N(l.qte), 0)) });
+  cols.push({ h: "Demandeur", f: d => who(d.createdBy) }, { h: "Créée le", f: d => fDT(d.createdAt) });
   if (where === "suivi") cols.push({ h: "N° saisi par", f: d => who(d.numBy) }, { h: "le", f: d => fDT(d.numAt) });
   else cols.push({ h: "Statut", f: d => daPill(d) });
   cols.push({ h: "", f: d => daActs(d, where) });
@@ -581,7 +586,7 @@ VIEWS.da = { title: "Création DA",
     else h += '<div class="banner info">Créez la demande (ou importez votre tableau) : le magasinier et l\'administrateur sont notifiés, puis le magasinier saisit le N° de DA et la demande passe dans « Suivi DA ».</div>';
     h += '<div class="panel"><h3>Demandes en attente du N° DA <small>' + pend.length + "</small></h3>" + table(daCols("crea"), pend, { empty: "Aucune demande en attente." }) + "</div>";
     if (S.role === "gestionnaire") { const mine = [...S.da.values()].filter(d => d.createdBy === S.uid && d.statut === "numerotee").sort((a, b) => (b.numAt || "").localeCompare(a.numAt || "")).slice(0, 10);
-      h += '<div class="panel"><h3>Mes dernières demandes numérotées</h3>' + table([{ h: "N° DA", f: d => "<b>" + mono(d.numero) + "</b>" }, { h: "Date DA", f: d => fD(d.date) }, { h: "Engin", f: d => mono(d.engin) }, { h: "Objet", f: d => esc(d.objet) }, { h: "Numérotée le", f: d => fDT(d.numAt) }, { h: "", f: d => daActs(d, "suivi") }], mine, { empty: "Aucune pour l'instant." }) + "</div>"; }
+      h += '<div class="panel"><h3>Mes dernières demandes numérotées</h3>' + table([{ h: "N° DA", f: d => "<b>" + mono(d.numero) + "</b>" }, { h: "Date DA", f: d => fD(d.date) }, { h: "Engin", f: d => mono(d.engin) }, { h: "Numérotée le", f: d => fDT(d.numAt) }, { h: "", f: d => daActs(d, "suivi") }], mine, { empty: "Aucune pour l'instant." }) + "</div>"; }
     return h; } };
 
 VIEWS.suivida = { title: "Suivi DA",
@@ -599,24 +604,23 @@ const lineRow = (l, i) => '<tr data-i="' + i + '"><td><input class="dl-poste" va
 function daForm(d) {
   const isNew = !d; d = d || { date: today(), engin: "", objet: "" };
   const L = isNew ? [] : daLines(d.id); while (L.length < (isNew ? 5 : Math.max(1, L.length))) L.push({ poste: "", designation: "", ref: "", qte: "", engin: "" });
-  const html = '<div class="fgrid">' + F("d-date", "Date de la DA *", '<input id="d-date" type="date" value="' + esc(d.date) + '">') + F("d-eng", "Engin principal (facultatif)", '<input id="d-eng" list="dl-engins" value="' + esc(d.engin) + '" placeholder="ex. 31549"><div class="hint">Repris dans les lignes sans Code_Engin.</div>') +
-    F("d-obj", "Objet / observations", '<input id="d-obj" value="' + esc(d.objet) + '" placeholder="ex. Révision 500 h">', "full") + "</div>" +
+  const html = '<div class="fgrid">' + F("d-date", "Date de la DA *", '<input id="d-date" type="date" value="' + esc(d.date) + '">') + "</div>" +
     '<div class="tw le"><table><thead><tr><th style="width:90px">N° Poste</th><th>Désignation Catalogue</th><th style="width:150px">Référence</th><th style="width:90px">Quantité *</th><th style="width:110px">Code_Engin</th><th style="width:40px"></th></tr></thead><tbody id="dl-body">' + L.map(lineRow).join("") + "</tbody></table></div>" +
     '<div class="actions" style="justify-content:flex-start;margin-top:8px"><button type="button" class="btn small" id="dl-add">+ Ajouter une ligne</button><span class="hint">Une ligne = un article. Les lignes vides sont ignorées.</span></div>';
   const ov = modal(isNew ? "Nouvelle demande d'achat" : "Modifier la demande #" + d.id, html, async ov => {
-    const date = fv(ov, "d-date"), eng = fv(ov, "d-eng"), objet = fv(ov, "d-obj");
-    if (!date) return "Saisissez la date de la DA."; if (eng && !S.engins.has(eng)) return "Engin principal " + eng + " inconnu.";
+    const date = fv(ov, "d-date"); if (!date) return "Saisissez la date de la DA.";
     const rows = [], errs = [];
-    ov.querySelectorAll("#dl-body tr").forEach((tr, k) => { const g = c => tr.querySelector(c).value.trim(); const poste = g(".dl-poste"), des = g(".dl-des"), ref = g(".dl-ref"), qs = g(".dl-qte"), le = g(".dl-eng") || eng;
+    ov.querySelectorAll("#dl-body tr").forEach((tr, k) => { const g = c => tr.querySelector(c).value.trim(); const poste = g(".dl-poste"), des = g(".dl-des"), ref = g(".dl-ref"), qs = g(".dl-qte"), le = g(".dl-eng");
       if (!poste && !des && !ref && !qs && !g(".dl-eng")) return; const q = +qs.replace(",", ".");
       if (!des && !ref) errs.push("ligne " + (k + 1) + " : désignation ou référence manquante"); if (!(q > 0)) errs.push("ligne " + (k + 1) + " : quantité invalide"); if (le && !S.engins.has(le)) errs.push("ligne " + (k + 1) + " : engin " + le + " inconnu");
       rows.push({ poste: poste || null, designation: des || null, ref: ref || null, qte: q, engin: le || null }); });
     if (errs.length) return errs.slice(0, 4).join(" · "); if (!rows.length) return "Ajoutez au moins une ligne.";
-    if (isNew) { const r = await must(sb.from("da").insert({ date_da: date, engin: eng || null, objet: objet || null }).select().single());
+    const engs = [...new Set(rows.map(x => x.engin).filter(Boolean))], eng = engs.length === 1 ? engs[0] : null;  // engin de la DA = Code_Engin des lignes
+    if (isNew) { const r = await must(sb.from("da").insert({ date_da: date, engin: eng }).select().single());
       try { const ls = await must(sb.from("da_lignes").insert(rows.map(x => Object.assign({ da_id: r.id }, x))).select()); S.da.set(r.id, mapDA(r)); ls.forEach(l => S.daL.set(l.id, mapDL(l))); }
       catch (e) { await sb.from("da").delete().eq("id", r.id); throw e; }
       schedule(); toast("Demande d'achat #" + r.id + " créée (" + rows.length + " ligne(s)). Le magasinier et l'administrateur sont notifiés."); return; }
-    const r = await must(sb.from("da").update({ date_da: date, engin: eng || null, objet: objet || null }).eq("id", d.id).select().single());
+    const r = await must(sb.from("da").update({ date_da: date, engin: eng }).eq("id", d.id).select().single());
     await must(sb.from("da_lignes").delete().eq("da_id", d.id)); daLines(d.id).forEach(l => S.daL.delete(l.id));
     const ls = await must(sb.from("da_lignes").insert(rows.map(x => Object.assign({ da_id: d.id }, x))).select());
     S.da.set(r.id, mapDA(r)); ls.forEach(l => S.daL.set(l.id, mapDL(l))); schedule(); toast("Demande #" + d.id + " modifiée."); }, isNew ? "Créer la demande" : "Enregistrer", true);
@@ -653,12 +657,12 @@ function daImportDialog() {
   if (!S.canCreateDA) { toast("Seuls l'administrateur et le gestionnaire créent des demandes d'achat."); return; }
   let groups = [];
   const html = '<p class="muted" style="margin-top:0">Choisissez votre tableau de demande d\'achat (.xlsx, .xls ou .csv) au format du canevas : <b>Date · DA · N° Poste · Désignation Catalogue · Référance · Quantité · Code_Engin</b>. Chaque feuille devient une demande ; si la colonne DA contient plusieurs numéros, une demande est créée par numéro.</p>' +
-    '<div class="tools" style="margin-bottom:8px">' + F("di-file", "Fichier", '<input id="di-file" type="file" accept=".xlsx,.xls,.xlsm,.csv">') + F("di-obj", "Objet (facultatif)", '<input id="di-obj" placeholder="ex. Commande filtres octobre">') + '<span class="grow"></span><button type="button" class="btn" data-act="da-tpl">Télécharger le canevas DA</button></div><div id="di-prev" class="imp-prev"></div>';
+    '<div class="tools" style="margin-bottom:8px">' + F("di-file", "Fichier", '<input id="di-file" type="file" accept=".xlsx,.xls,.xlsm,.csv">') + '<span class="grow"></span><button type="button" class="btn" data-act="da-tpl">Télécharger le canevas DA</button></div><div id="di-prev" class="imp-prev"></div>';
   const ov = modal("Importer un tableau de demande d'achat", html, async ov => {
     const ok = groups.filter(g => g.ok.length && !g.err); if (!ok.length) return "Aucune demande importable : corrigez le fichier.";
-    const btn = ov.querySelector("#mf-save"), objet = fv(ov, "di-obj"); let n = 0;
+    const btn = ov.querySelector("#mf-save"); let n = 0;
     for (const g of ok) { btn.textContent = "Import… " + n + "/" + ok.length;
-      const head = { date_da: g.date, engin: g.engin || null, objet: objet || null, source: "import" }; if (g.num && S.canNumDA) head.numero_da = g.num;
+      const head = { date_da: g.date, engin: g.engin || null, source: "import" }; if (g.num && S.canNumDA) head.numero_da = g.num;
       const r = await must(sb.from("da").insert(head).select().single());
       try { const ls = await must(sb.from("da_lignes").insert(g.ok.map(l => Object.assign({ da_id: r.id }, l))).select()); S.da.set(r.id, mapDA(r)); ls.forEach(l => S.daL.set(l.id, mapDL(l))); }
       catch (e) { await sb.from("da").delete().eq("id", r.id); throw e; } n++; }
@@ -723,15 +727,20 @@ async function daPdf(d) {
   doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.text([APPNAME, S.params.nom_chantier || ""].filter(Boolean).join("  -  "), 14, 18);
   doc.setFont("helvetica", "bold"); doc.setFontSize(13); doc.text(d.numero ? "N° DA : " + d.numero : "N° DA : en attente", W - 14, 11, { align: "right" });
   doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.text("Réf. interne #" + d.id, W - 14, 18, { align: "right" });
-  doc.setTextColor(30); const info = [["Date de la DA", fD(d.date)], ["Engin principal", d.engin ? d.engin + (enginTxt(d.engin) ? " - " + enginTxt(d.engin) : "") : "Plusieurs / non précisé"], ["Objet", d.objet || "-"],
-    ["Demandeur", nameOf(d.createdBy) === "Vous" ? ((S.me && S.me.nom) || "") : nameOf(d.createdBy)], ["Créée le", fDT(d.createdAt)], ["N° saisi par", d.numBy ? (d.numBy === S.uid ? ((S.me && S.me.nom) || "") : nameOf(d.numBy)) + " le " + fDT(d.numAt) : "-"]];
-  doc.autoTable({ startY: 30, body: info, theme: "plain", styles: { fontSize: 9.5, cellPadding: 1.2 }, columnStyles: { 0: { fontStyle: "bold", cellWidth: 38, textColor: [15, 76, 92] } }, margin: { left: 14, right: 14 } });
+  doc.setTextColor(30);
+  // engin(s) : le code saisi dans Code_Engin des lignes → désignation, marque, type (modèle), série de la fiche engin
+  const codes = [...new Set(L.map(l => l.engin).filter(Boolean))], eg = c => S.engins.get(String(c)) || {};
+  if (codes.length <= 1) { const c = codes[0] || "", e = eg(c);
+    doc.autoTable({ startY: 30, body: [["Date de la DA", fD(d.date)], ["Code engin", c || "-"], ["Désignation", e.designation || "-"], ["Marque", e.marque || "-"], ["Type", e.modele || "-"], ["N° de série", e.serie || "-"]],
+      theme: "plain", styles: { fontSize: 9.5, cellPadding: 1.2 }, columnStyles: { 0: { fontStyle: "bold", cellWidth: 38, textColor: [15, 76, 92] } }, margin: { left: 14, right: 14 } });
+  } else {
+    doc.autoTable({ startY: 30, body: [["Date de la DA", fD(d.date)]], theme: "plain", styles: { fontSize: 9.5, cellPadding: 1.2 }, columnStyles: { 0: { fontStyle: "bold", cellWidth: 38, textColor: [15, 76, 92] } }, margin: { left: 14, right: 14 } });
+    doc.autoTable({ startY: doc.lastAutoTable.finalY + 2, head: [["Code engin", "Désignation", "Marque", "Type", "N° de série"]], body: codes.map(c => { const e = eg(c); return [c, e.designation || "-", e.marque || "-", e.modele || "-", e.serie || "-"]; }),
+      theme: "grid", margin: { left: 14, right: 14 }, styles: { fontSize: 9, cellPadding: 1.6, lineColor: [160, 160, 160], lineWidth: 0.1, textColor: 20 }, headStyles: { fillColor: [222, 234, 237], textColor: [15, 76, 92], fontStyle: "bold" } }); }
   doc.autoTable({ startY: doc.lastAutoTable.finalY + 4, head: [["N° Poste", "Désignation Catalogue", "Référence", "Quantité", "Code_Engin"]], body: L.map(l => [l.poste, l.designation, l.ref, nb(l.qte), l.engin]),
-    foot: [["", "Total : " + L.length + " ligne(s)", "", nb(L.reduce((t, l) => t + N(l.qte), 0)), ""]], theme: "grid", margin: { left: 14, right: 14 },
+    theme: "grid", margin: { left: 14, right: 14 },
     styles: { fontSize: 9.5, cellPadding: 2, lineColor: [120, 120, 120], lineWidth: 0.1, textColor: 20 }, headStyles: { fillColor: [255, 255, 0], textColor: 0, fontStyle: "bold", halign: "center" },
-    footStyles: { fillColor: [240, 240, 240], textColor: 0, fontStyle: "bold" }, columnStyles: { 0: { halign: "center", cellWidth: 20 }, 2: { cellWidth: 36 }, 3: { halign: "center", cellWidth: 20, fontStyle: "bold" }, 4: { halign: "center", cellWidth: 26, fontStyle: "bold" } } });
-  let y = doc.lastAutoTable.finalY + 12; if (y > 250) { doc.addPage(); y = 20; }
-  const bw = (W - 28 - 8) / 3; ["Demandeur", "Magasinier", "Visa responsable"].forEach((t, i) => { const x = 14 + i * (bw + 4); doc.setDrawColor(150); doc.rect(x, y, bw, 28); doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.text(t, x + 3, y + 5); });
+    columnStyles: { 0: { halign: "center", cellWidth: 20 }, 2: { cellWidth: 36 }, 3: { halign: "center", cellWidth: 20, fontStyle: "bold" }, 4: { halign: "center", cellWidth: 26, fontStyle: "bold" } } });
   const pages = doc.getNumberOfPages(); for (let p = 1; p <= pages; p++) { doc.setPage(p); doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(120); doc.text("Édité le " + new Date().toLocaleString("fr-FR") + "  -  page " + p + "/" + pages, W / 2, 290, { align: "center" }); }
   doc.save("DA_" + fileSafe(d.numero || ("interne_" + d.id)) + (d.engin ? "_" + fileSafe(d.engin) : "") + ".pdf");
 }
