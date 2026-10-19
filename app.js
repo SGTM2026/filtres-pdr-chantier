@@ -209,7 +209,7 @@ VIEWS.stock = { title: () => "Stock actuel" + (S.f.stockCat ? " – " + CATS[S.f
   rows() { const q = norm(S.f.stockQ); return C.lines.filter(l => (!S.f.stockCat || l.cat === S.f.stockCat) && (!S.f.stockSt || l.statut === S.f.stockSt) && (!q || norm(l.ref + " " + l.engin + " " + l.label + " " + l.type + " " + l.marque + " " + l.equiv).includes(q))); },
   body() { const r = this.rows(); return '<div class="more">' + r.length + " ligne(s) · " + nb(sumStock(r)) + " article(s) en stock · Stock = stock de départ + entrées livrées (BL) − sorties</div>" + table([
     { h: "Cat.", f: l => catPill(l.cat) }, { h: "Affectation", f: l => mono(l.engin || "Commun") }, { h: "Engin", f: l => esc(l.label) }, { h: "Référence", f: l => mono(l.ref) }, { h: "Désignation / type", f: l => esc(l.type) }, { h: "Marque", f: l => esc(l.marque) },
-    { h: "Entrées", n: 1, f: l => nb(l.ent) }, { h: "Sorties", n: 1, f: l => nb(l.sor) }, { h: "Stock", n: 1, f: l => "<b>" + nb(l.stock) + "</b>" }, { h: "Seuil", n: 1, f: l => nb(l.seuil) },
+    { h: "Entrées", n: 1, f: l => nb(l.ent) }, { h: "Sorties", n: 1, f: l => nb(l.sor) }, { h: "Stock", n: 1, f: l => "<b>" + nb(l.stock) + "</b>" },
     { h: "Statut", f: l => pill(l.statut) }, { h: "Dern. entrée", f: l => fD(l.lastE) }, { h: "Dern. sortie", f: l => fD(l.lastS) }], r, { empty: "Aucune ligne." }); } };
 
 VIEWS.entrees = { title: () => "Entrées – " + CATS[S.f.cat].label,
@@ -249,7 +249,7 @@ VIEWS.engin = { title: "Suivi par engin",
       const chips = Object.keys(names).filter(k => R[k]).map(k => { const o = C.lineMap.get(KEY("FILTRE", R[k], code)), c = C.lineMap.get(KEY("FILTRE", R[k], "")); return '<span class="chip">' + names[k] + " <b>" + esc(R[k]) + "</b> · propre " + (o ? nb(o.stock) : "–") + " · commun " + (c ? nb(c.stock) : "–") + "</span>"; }).join("");
       if (chips) h += '<div class="panel"><h3>Filtres prévus dans la fiche engin</h3><div class="chips">' + chips + "</div></div>"; }
     h += '<div class="panel"><h3>Stock affecté à cet engin <small>filtres et PDR</small></h3>' + table([{ h: "Cat.", f: l => catPill(l.cat) }, { h: "Référence", f: l => mono(l.ref) }, { h: "Désignation / type", f: l => esc(l.type) }, { h: "Marque", f: l => esc(l.marque) }, { h: "Entrées", n: 1, f: l => nb(l.ent) },
-      { h: "Sorties", n: 1, f: l => nb(l.sor) }, { h: "Stock", n: 1, f: l => "<b>" + nb(l.stock) + "</b>" }, { h: "Seuil", n: 1, f: l => nb(l.seuil) }, { h: "Statut", f: l => pill(l.statut) }, { h: "Dern. sortie", f: l => fD(l.lastS) }], L, { empty: "Aucun stock affecté : les articles de cet engin sont pris sur le stock commun." }) + "</div>";
+      { h: "Sorties", n: 1, f: l => nb(l.sor) }, { h: "Stock", n: 1, f: l => "<b>" + nb(l.stock) + "</b>" }, { h: "Statut", f: l => pill(l.statut) }, { h: "Dern. sortie", f: l => fD(l.lastS) }], L, { empty: "Aucun stock affecté : les articles de cet engin sont pris sur le stock commun." }) + "</div>";
     h += '<div class="panel"><h3>Commandés non livrés <small>toutes dates</small></h3>' + table([{ h: "Cat.", f: x => catPill(x.cat) }, { h: "Date", f: x => fD(x.date) }, { h: "Référence", f: x => mono(x.ref) }, { h: "Désignation / type", f: x => esc(x.type) }, { h: "Qté BC", n: 1, f: x => nb(x.dem) }, { h: "Qté BL", n: 1, f: x => nb(x.liv || 0) },
       { h: "Reste", n: 1, f: x => '<span class="reste">' + nb(x.reste) + "</span>" }, { h: "N° BC", f: x => esc(x.bc) }, { h: "N° BL", f: x => esc(x.bl) }, { h: "", f: x => rowActs("entree", x) }], att, { empty: "Aucune commande en attente." }) + "</div>";
     const mv = s => s.mvt === "sans" ? "Sans entrée en magasin" : (s.engin === code ? (s.stockEng === code ? "Propre stock" : (s.stockEng === "" ? "Stock commun" : "Emprunté au " + s.stockEng)) : "Prêté au " + s.engin);
@@ -270,7 +270,7 @@ VIEWS.ref = { title: "Recherche référence",
     h += '<div class="kpis">' + kpi("Stock actuel total", nb(tot)) + '<div class="kpi"><b>' + (st === "–" ? "–" : pill(st)) + "</b><span>Statut global</span></div>" + kpi("Lignes d'affectation", nb(L.length)) + kpi("Entrés (livrés)", nb(L.reduce((t, l) => t + l.ent, 0))) +
       kpi("Sortis", nb(so.reduce((t, s) => t + N(s.qte), 0))) + (i.cat === "FILTRE" ? kpi("Engins qui la prévoient", nb(prev.length)) : "") + "</div>";
     h += '<div class="panel"><h3>Affectation du stock</h3>' + table([{ h: "Cat.", f: l => catPill(l.cat) }, { h: "Code engin", f: l => esc(l.engin || "Commun") }, { h: "Engin d'affectation", f: l => esc(l.label) }, { h: "Entrées", n: 1, f: l => nb(l.ent) }, { h: "Sorties", n: 1, f: l => nb(l.sor) },
-      { h: "Stock", n: 1, f: l => "<b>" + nb(l.stock) + "</b>" }, { h: "Seuil", n: 1, f: l => nb(l.seuil) }, { h: "Statut", f: l => pill(l.statut) }, { h: "Dern. entrée", f: l => fD(l.lastE) }, { h: "Dern. sortie", f: l => fD(l.lastS) }], L, { empty: "Cette référence n'a aucune ligne de stock." }) + "</div>";
+      { h: "Stock", n: 1, f: l => "<b>" + nb(l.stock) + "</b>" }, { h: "Statut", f: l => pill(l.statut) }, { h: "Dern. entrée", f: l => fD(l.lastE) }, { h: "Dern. sortie", f: l => fD(l.lastS) }], L, { empty: "Cette référence n'a aucune ligne de stock." }) + "</div>";
     h += '<div class="panel"><h3>Commandes non livrées <small>toutes dates</small></h3>' + table([{ h: "Date", f: x => fD(x.date) }, { h: "Engin destinataire", f: x => esc(x.engin ? x.engin + " – " + C.label(x.engin) : "Stock commun") }, { h: "Qté BC", n: 1, f: x => nb(x.dem) }, { h: "Qté BL", n: 1, f: x => nb(x.liv || 0) },
       { h: "Reste", n: 1, f: x => '<span class="reste">' + nb(x.reste) + "</span>" }, { h: "N° BC", f: x => esc(x.bc) }, { h: "N° BL", f: x => esc(x.bl) }, { h: "", f: x => rowActs("entree", x) }], att, { empty: "Aucune commande en attente." }) + "</div>";
     const by = new Map(); for (const s of so) { const o = by.get(s.engin) || { engin: s.engin, cat: s.cat, qte: 0, n: 0, last: "", emp: 0 }; o.qte += N(s.qte); o.n++; if ((s.date || "") > o.last) o.last = s.date; if (s.mvt === "emprunt") o.emp += N(s.qte); by.set(s.engin, o); }
@@ -292,7 +292,7 @@ VIEWS.depart = { title: () => "Stock de départ" + (S.f.depCat ? " – " + CATS[
   bind() { $("#sd-q").oninput = e => { S.f.depQ = e.target.value; render(); }; },
   body() { const q = norm(S.f.depQ); const r = C.depart.filter(d => (!S.f.depCat || d.cat === S.f.depCat) && (!q || norm([d.ref, d.engin, d.type, d.marque, d.equiv, d.empl, d.obs].join(" ")).includes(q)));
     return '<div class="more">' + r.length + " ligne(s) · " + nb(r.reduce((t, d) => t + N(d.qte), 0)) + " article(s) à l'inventaire</div>" + table([{ h: "Cat.", f: d => catPill(d.cat) }, { h: "Date", f: d => fD(d.date) }, { h: "Code engin", f: d => esc(d.engin || "Commun") }, { h: "Référence", f: d => mono(d.ref) },
-      { h: "Désignation / type", f: d => esc(d.type) }, { h: "Marque", f: d => esc(d.marque) }, { h: "Réf. équiv.", f: d => esc(d.equiv) }, { h: "Qté", n: 1, f: d => nb(d.qte) }, { h: "Seuil", n: 1, f: d => nb(d.min) }, { h: "Emplacement", f: d => esc(d.empl) },
+      { h: "Désignation / type", f: d => esc(d.type) }, { h: "Marque", f: d => esc(d.marque) }, { h: "Réf. équiv.", f: d => esc(d.equiv) }, { h: "Qté", n: 1, f: d => nb(d.qte) }, { h: "Emplacement", f: d => esc(d.empl) },
       { h: "", f: d => S.isAdmin ? '<div class="rowact"><button class="btn small" data-act="edit-dep" data-id="' + d.id + '">Modifier</button><button class="btn small danger" data-act="del-dep" data-id="' + d.id + '">Suppr.</button></div>' : "" }], r, { empty: "Aucune ligne." }); } };
 
 VIEWS.params = { title: "Paramètres", body() { const P = S.params, ro = S.isAdmin ? "" : " readonly";
@@ -541,7 +541,7 @@ function confirmBox(text, onYes) { modal("Confirmer", "<p>" + esc(text) + "</p>"
    DEMANDES D'ACHAT (DA) : création, numérotation par le magasinier, suivi
    ===================================================================== */
 const mapDA = r => ({ id: r.id, date: r.date_da || "", engin: r.engin || "", objet: r.objet || "", statut: r.statut, numero: r.numero_da || "", numAt: r.numero_at, numBy: r.numero_by, createdAt: r.created_at, createdBy: r.created_by });
-const mapDL = r => ({ id: r.id, da: r.da_id, poste: r.poste || "", designation: r.designation || "", ref: r.ref || "", qte: r.qte, engin: r.engin || "", obs: r.obs || "" });
+const mapDL = r => ({ id: r.id, da: r.da_id, poste: r.poste || "", designation: r.designation || "", ref: r.ref || "", qte: r.qte, unite: r.unite || "", engin: r.engin || "", obs: r.obs || "" });
 const daLines = id => [...S.daL.values()].filter(l => l.da === id).sort((a, b) => a.id - b.id);
 const daLabel = d => d.numero ? "DA " + d.numero : "Demande #" + d.id;
 const canEditDA = d => d.statut === "en_attente" && (S.isAdmin || (S.role === "gestionnaire" && d.createdBy === S.uid));
@@ -600,20 +600,20 @@ VIEWS.suivida = { title: "Suivi DA",
 
 /* ---------- formulaire DA ---------- */
 const lineRow = (l, i) => '<tr data-i="' + i + '"><td><input class="dl-poste" value="' + esc(l.poste) + '"></td><td><input class="dl-des" list="dl-types" value="' + esc(l.designation) + '"></td><td><input class="dl-ref" list="dl-refs" value="' + esc(l.ref) + '"></td>' +
-  '<td><input class="dl-qte" type="number" min="0" step="any" value="' + esc(l.qte ?? "") + '"></td><td><input class="dl-eng" list="dl-engins" value="' + esc(l.engin) + '"></td><td><button type="button" class="btn small danger dl-del" title="Retirer la ligne">×</button></td></tr>';
+  '<td><input class="dl-qte" type="number" min="0" step="any" value="' + esc(l.qte ?? "") + '"></td><td><input class="dl-uni" list="dl-unites" value="' + esc(l.unite) + '"></td><td><input class="dl-eng" list="dl-engins" value="' + esc(l.engin) + '"></td><td><button type="button" class="btn small danger dl-del" title="Retirer la ligne">×</button></td></tr>';
 function daForm(d) {
   const isNew = !d; d = d || { date: today(), engin: "", objet: "" };
-  const L = isNew ? [] : daLines(d.id); while (L.length < (isNew ? 5 : Math.max(1, L.length))) L.push({ poste: "", designation: "", ref: "", qte: "", engin: "" });
+  const L = isNew ? [] : daLines(d.id); while (L.length < (isNew ? 5 : Math.max(1, L.length))) L.push({ poste: "", designation: "", ref: "", qte: "", unite: "", engin: "" });
   const html = '<div class="fgrid">' + F("d-date", "Date de la DA *", '<input id="d-date" type="date" value="' + esc(d.date) + '">') + "</div>" +
-    '<div class="tw le"><table><thead><tr><th style="width:90px">N° Poste</th><th>Désignation Catalogue</th><th style="width:150px">Référence</th><th style="width:90px">Quantité *</th><th style="width:110px">Code_Engin</th><th style="width:40px"></th></tr></thead><tbody id="dl-body">' + L.map(lineRow).join("") + "</tbody></table></div>" +
+    '<div class="tw le"><table><thead><tr><th style="width:90px">N° Poste</th><th>Désignation Catalogue</th><th style="width:150px">Référence</th><th style="width:90px">Quantité *</th><th style="width:90px">Unité</th><th style="width:110px">Code_Engin</th><th style="width:40px"></th></tr></thead><tbody id="dl-body">' + L.map(lineRow).join("") + "</tbody></table></div>" + '<datalist id="dl-unites">' + ["U", "PCS", "JEU", "KIT", "L", "KG", "M", "PAIRE", "BOITE"].map(u => '<option value="' + u + '">').join("") + "</datalist>" +
     '<div class="actions" style="justify-content:flex-start;margin-top:8px"><button type="button" class="btn small" id="dl-add">+ Ajouter une ligne</button><span class="hint">Une ligne = un article. Les lignes vides sont ignorées.</span></div>';
   const ov = modal(isNew ? "Nouvelle demande d'achat" : "Modifier la demande #" + d.id, html, async ov => {
     const date = fv(ov, "d-date"); if (!date) return "Saisissez la date de la DA.";
     const rows = [], errs = [];
-    ov.querySelectorAll("#dl-body tr").forEach((tr, k) => { const g = c => tr.querySelector(c).value.trim(); const poste = g(".dl-poste"), des = g(".dl-des"), ref = g(".dl-ref"), qs = g(".dl-qte"), le = g(".dl-eng");
-      if (!poste && !des && !ref && !qs && !g(".dl-eng")) return; const q = +qs.replace(",", ".");
+    ov.querySelectorAll("#dl-body tr").forEach((tr, k) => { const g = c => tr.querySelector(c).value.trim(); const poste = g(".dl-poste"), des = g(".dl-des"), ref = g(".dl-ref"), qs = g(".dl-qte"), un = g(".dl-uni"), le = g(".dl-eng");
+      if (!poste && !des && !ref && !qs && !un && !le) return; const q = +qs.replace(",", ".");
       if (!des && !ref) errs.push("ligne " + (k + 1) + " : désignation ou référence manquante"); if (!(q > 0)) errs.push("ligne " + (k + 1) + " : quantité invalide"); if (le && !S.engins.has(le)) errs.push("ligne " + (k + 1) + " : engin " + le + " inconnu");
-      rows.push({ poste: poste || null, designation: des || null, ref: ref || null, qte: q, engin: le || null }); });
+      rows.push({ poste: poste || null, designation: des || null, ref: ref || null, qte: q, unite: un || null, engin: le || null }); });
     if (errs.length) return errs.slice(0, 4).join(" · "); if (!rows.length) return "Ajoutez au moins une ligne.";
     const engs = [...new Set(rows.map(x => x.engin).filter(Boolean))], eng = engs.length === 1 ? engs[0] : null;  // engin de la DA = Code_Engin des lignes
     if (isNew) { const r = await must(sb.from("da").insert({ date_da: date, engin: eng }).select().single());
@@ -625,7 +625,7 @@ function daForm(d) {
     const ls = await must(sb.from("da_lignes").insert(rows.map(x => Object.assign({ da_id: d.id }, x))).select());
     S.da.set(r.id, mapDA(r)); ls.forEach(l => S.daL.set(l.id, mapDL(l))); schedule(); toast("Demande #" + d.id + " modifiée."); }, isNew ? "Créer la demande" : "Enregistrer", true);
   const body = ov.querySelector("#dl-body"); let n = L.length;
-  ov.querySelector("#dl-add").onclick = () => { body.insertAdjacentHTML("beforeend", lineRow({ poste: "", designation: "", ref: "", qte: "", engin: "" }, n++)); };
+  ov.querySelector("#dl-add").onclick = () => { body.insertAdjacentHTML("beforeend", lineRow({ poste: "", designation: "", ref: "", qte: "", unite: "", engin: "" }, n++)); };
   body.addEventListener("click", e => { const b = e.target.closest(".dl-del"); if (b) { if (body.children.length > 1) b.closest("tr").remove(); else b.closest("tr").querySelectorAll("input").forEach(i => i.value = ""); } });
   body.addEventListener("change", e => { if (!e.target.classList.contains("dl-ref")) return; const tr = e.target.closest("tr"), des = tr.querySelector(".dl-des"); if (!des.value.trim() && C) { const i = C.info(e.target.value.trim()); if (i && i.type) des.value = i.type; } });
 }
@@ -642,7 +642,7 @@ function daView(d) {
   const L = daLines(d.id);
   const html = '<div class="kpis">' + kpi("Statut", d.statut === "numerotee" ? "N° " + esc(d.numero) : "En attente", d.statut === "numerotee" ? "txt" : "warn") + kpi("Date DA", fD(d.date), "txt") + kpi("Lignes", nb(L.length)) + kpi("Qté totale", nb(L.reduce((t, l) => t + N(l.qte), 0))) + "</div>" +
     '<p class="muted">' + (d.engin ? "Engin principal : <b>" + esc(d.engin) + "</b> " + esc(enginTxt(d.engin)) + " · " : "") + (d.objet ? "Objet : " + esc(d.objet) + " · " : "") + "Demandeur : " + esc(nameOf(d.createdBy)) + " · créée le " + fDT(d.createdAt) + (d.numAt ? " · N° saisi par " + esc(nameOf(d.numBy)) + " le " + fDT(d.numAt) : "") + "</p>" +
-    table([{ h: "N° Poste", f: l => esc(l.poste) }, { h: "Désignation Catalogue", f: l => esc(l.designation) }, { h: "Référence", f: l => mono(l.ref) }, { h: "Quantité", n: 1, f: l => "<b>" + nb(l.qte) + "</b>" }, { h: "Code_Engin", f: l => mono(l.engin) }], L, { empty: "Aucune ligne." }) +
+    table([{ h: "N° Poste", f: l => esc(l.poste) }, { h: "Désignation Catalogue", f: l => esc(l.designation) }, { h: "Référence", f: l => mono(l.ref) }, { h: "Quantité", n: 1, f: l => "<b>" + nb(l.qte) + "</b>" }, { h: "Unité", f: l => esc(l.unite) }, { h: "Code_Engin", f: l => mono(l.engin) }], L, { empty: "Aucune ligne." }) +
     '<div class="actions" style="justify-content:flex-start"><button type="button" class="btn" data-act="da-pdf" data-id="' + d.id + '">Télécharger PDF</button><button type="button" class="btn" data-act="da-xls" data-id="' + d.id + '">Télécharger Excel</button>' +
     (S.canNumDA && d.statut === "en_attente" ? '<button type="button" class="btn primary" data-act="da-num" data-id="' + d.id + '">Saisir N° DA</button>' : "") + "</div>";
   const ov = modal(daLabel(d), html, async () => {}, "Fermer", true); ov.querySelector("#mf-cancel").hidden = true;
@@ -652,11 +652,11 @@ function daView(d) {
 /* ---------- import d'un tableau de DA (canevas : Date | DA | N° Poste | Désignation Catalogue | Référance | Quantité | Code_Engin) ---------- */
 const DA_COLS = [["date", "Date", ["date", "datedemande", "dateda"]], ["num", "DA", ["da", "nda", "numda", "numeroda", "nodemandeachat", "demandeachat"]], ["poste", "N° Poste", ["nposte", "poste", "numeroposte", "noposte", "item"]],
   ["designation", "Désignation Catalogue", ["designationcatalogue", "designation", "libelle", "article", "description"]], ["ref", "Référance", ["referance", "reference", "ref", "codearticle", "refpiece", "referencefiltre"]],
-  ["qte", "Quantité", ["quantite", "qte", "qtedemandee", "quantitedemandee"]], ["engin", "Code_Engin", ["codeengin", "engin", "codeengins", "enginconcerne"]]];
+  ["qte", "Quantité", ["quantite", "qte", "qtedemandee", "quantitedemandee"]], ["unite", "Unité", ["unite", "unites", "um", "udm", "uniteqte", "unitedemesure"]], ["engin", "Code_Engin", ["codeengin", "engin", "codeengins", "enginconcerne"]]];
 function daImportDialog() {
   if (!S.canCreateDA) { toast("Seuls l'administrateur et le gestionnaire créent des demandes d'achat."); return; }
   let groups = [];
-  const html = '<p class="muted" style="margin-top:0">Choisissez votre tableau de demande d\'achat (.xlsx, .xls ou .csv) au format du canevas : <b>Date · DA · N° Poste · Désignation Catalogue · Référance · Quantité · Code_Engin</b>. Chaque feuille devient une demande ; si la colonne DA contient plusieurs numéros, une demande est créée par numéro.</p>' +
+  const html = '<p class="muted" style="margin-top:0">Choisissez votre tableau de demande d\'achat (.xlsx, .xls ou .csv) au format du canevas : <b>Date · DA · N° Poste · Désignation Catalogue · Référance · Quantité · Unité · Code_Engin</b> (la colonne Unité est facultative). Chaque feuille devient une demande ; si la colonne DA contient plusieurs numéros, une demande est créée par numéro.</p>' +
     '<div class="tools" style="margin-bottom:8px">' + F("di-file", "Fichier", '<input id="di-file" type="file" accept=".xlsx,.xls,.xlsm,.csv">') + '<span class="grow"></span><button type="button" class="btn" data-act="da-tpl">Télécharger le canevas DA</button></div><div id="di-prev" class="imp-prev"></div>';
   const ov = modal("Importer un tableau de demande d'achat", html, async ov => {
     const ok = groups.filter(g => g.ok.length && !g.err); if (!ok.length) return "Aucune demande importable : corrigez le fichier.";
@@ -680,7 +680,7 @@ function daImportDialog() {
           const dt = pDate(g("date")); if (!dt.err && !dt.warn) grp.dates.push(dt.v);
           const q = pNum(g("qte")), ref = pStr(g("ref")), des = pStr(g("designation")), eng = pStr(g("engin")) || sheetEng, errs = [];
           if (!ref && !des) errs.push("désignation et référence vides"); if (q === null || Number.isNaN(q) || q <= 0) errs.push("quantité invalide"); if (eng && !S.engins.has(eng)) errs.push("engin " + eng + " inconnu"); if (dt.err) errs.push(dt.err);
-          grp.lines.push({ line: hIdx + 2 + i, errs, row: { poste: pStr(g("poste")) || null, designation: des || null, ref: ref || null, qte: q, engin: eng || null } }); });
+          grp.lines.push({ line: hIdx + 2 + i, errs, row: { poste: pStr(g("poste")) || null, designation: des || null, ref: ref || null, qte: q, unite: pStr(g("unite")) || null, engin: eng || null } }); });
         for (const grp of by.values()) { const engs = [...new Set(grp.lines.map(l => l.row.engin).filter(Boolean))];
           grp.engin = engs.length === 1 ? engs[0] : sheetEng; grp.date = grp.dates.sort()[0] || today(); grp.ok = grp.lines.filter(l => !l.errs.length).map(l => l.row);
           if (grp.num && S.canNumDA && used.has(grp.num)) grp.err = "N° DA " + grp.num + " déjà enregistré"; if (grp.num && S.canNumDA) used.add(grp.num);
@@ -708,16 +708,16 @@ async function daExcel(list, name) {
   const wb = new ExcelJS.Workbook(); wb.creator = APPNAME;
   const one = list.length === 1, d0 = list[0];
   const ws = wb.addWorksheet(fileSafe(one ? (d0.engin || d0.numero || "DA") : "Suivi DA").slice(0, 31), { pageSetup: { paperSize: 9, orientation: "portrait", fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
-  ws.columns = [{ width: 11 }, { width: 13 }, { width: 11 }, { width: 32.45 }, { width: 17.73 }, { width: 8.09 }, { width: 15 }];
+  ws.columns = [{ width: 11 }, { width: 13 }, { width: 11 }, { width: 32.45 }, { width: 17.73 }, { width: 8.09 }, { width: 8 }, { width: 15 }];
   const thin = { style: "thin" }, bd = { top: thin, left: thin, bottom: thin, right: thin };
-  const hr = ws.addRow(["Date", "DA", "N° Poste", "Désignation Catalogue", "Référance", "Quantité", "Code_Engin"]); hr.height = 18.9;
+  const hr = ws.addRow(["Date", "DA", "N° Poste", "Désignation Catalogue", "Référance", "Quantité", "Unité", "Code_Engin"]); hr.height = 18.9;
   hr.eachCell(c => { c.font = { name: "Arial", size: 9, bold: true }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } }; c.border = bd; c.alignment = { horizontal: "center", vertical: "middle" }; });
   for (const d of list) for (const l of daLines(d.id)) {
     const num = /^\d{1,15}$/.test(d.numero) ? +d.numero : (d.numero || ""), poste = /^\d{1,9}$/.test(l.poste) ? +l.poste : l.poste, eng = /^\d{1,9}$/.test(l.engin) ? +l.engin : l.engin;
-    const r = ws.addRow([isoToDate(d.date), num, poste, l.designation, l.ref, N(l.qte), eng]);
-    r.eachCell({ includeEmpty: true }, (c, col) => { c.font = { name: "Arial", size: 10, bold: col >= 6 }; c.border = bd; c.alignment = { horizontal: [4, 5].includes(col) ? "left" : "center", vertical: "middle" }; });
+    const r = ws.addRow([isoToDate(d.date), num, poste, l.designation, l.ref, N(l.qte), l.unite, eng]);
+    r.eachCell({ includeEmpty: true }, (c, col) => { c.font = { name: "Arial", size: 10, bold: col === 6 || col === 8 }; c.border = bd; c.alignment = { horizontal: [4, 5].includes(col) ? "left" : "center", vertical: "middle" }; });
     r.getCell(1).numFmt = "dd/mm/yyyy"; }
-  ws.autoFilter = { from: "A1", to: { row: Math.max(1, ws.rowCount), column: 7 } };
+  ws.autoFilter = { from: "A1", to: { row: Math.max(1, ws.rowCount), column: 8 } };
   saveBlob(new Blob([await wb.xlsx.writeBuffer()], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), name);
 }
 async function daPdf(d) {
@@ -737,10 +737,10 @@ async function daPdf(d) {
     doc.autoTable({ startY: 30, body: [["Date de la DA", fD(d.date)]], theme: "plain", styles: { fontSize: 9.5, cellPadding: 1.2 }, columnStyles: { 0: { fontStyle: "bold", cellWidth: 38, textColor: [15, 76, 92] } }, margin: { left: 14, right: 14 } });
     doc.autoTable({ startY: doc.lastAutoTable.finalY + 2, head: [["Code engin", "Désignation", "Marque", "Type", "N° de série"]], body: codes.map(c => { const e = eg(c); return [c, e.designation || "-", e.marque || "-", e.modele || "-", e.serie || "-"]; }),
       theme: "grid", margin: { left: 14, right: 14 }, styles: { fontSize: 9, cellPadding: 1.6, lineColor: [160, 160, 160], lineWidth: 0.1, textColor: 20 }, headStyles: { fillColor: [222, 234, 237], textColor: [15, 76, 92], fontStyle: "bold" } }); }
-  doc.autoTable({ startY: doc.lastAutoTable.finalY + 4, head: [["N° Poste", "Désignation Catalogue", "Référence", "Quantité", "Code_Engin"]], body: L.map(l => [l.poste, l.designation, l.ref, nb(l.qte), l.engin]),
+  doc.autoTable({ startY: doc.lastAutoTable.finalY + 4, head: [["N° Poste", "Désignation Catalogue", "Référence", "Quantité", "Unité", "Code_Engin"]], body: L.map(l => [l.poste, l.designation, l.ref, nb(l.qte), l.unite, l.engin]),
     theme: "grid", margin: { left: 14, right: 14 },
     styles: { fontSize: 9.5, cellPadding: 2, lineColor: [120, 120, 120], lineWidth: 0.1, textColor: 20 }, headStyles: { fillColor: [255, 255, 0], textColor: 0, fontStyle: "bold", halign: "center" },
-    columnStyles: { 0: { halign: "center", cellWidth: 20 }, 2: { cellWidth: 36 }, 3: { halign: "center", cellWidth: 20, fontStyle: "bold" }, 4: { halign: "center", cellWidth: 26, fontStyle: "bold" } } });
+    columnStyles: { 0: { halign: "center", cellWidth: 20 }, 2: { cellWidth: 36 }, 3: { halign: "center", cellWidth: 20, fontStyle: "bold" }, 4: { halign: "center", cellWidth: 16 }, 5: { halign: "center", cellWidth: 26, fontStyle: "bold" } } });
   const pages = doc.getNumberOfPages(); for (let p = 1; p <= pages; p++) { doc.setPage(p); doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(120); doc.text("page " + p + "/" + pages, W / 2, 290, { align: "center" }); }
   doc.save("DA_" + fileSafe(d.numero || ("interne_" + d.id)) + (d.engin ? "_" + fileSafe(d.engin) : "") + ".pdf");
 }
