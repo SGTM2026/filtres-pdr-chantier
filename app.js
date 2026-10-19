@@ -308,7 +308,7 @@ VIEWS.users = { title: "Utilisateurs",
   body() { if (!S.isAdmin) return '<div class="empty">Réservé aux administrateurs.</div>';
     const act = new Map(); for (const j of S.journal) { if (!j.user_id) continue; const o = act.get(j.user_id) || { n: 0, last: "" }; o.n++; if (j.at > o.last) o.last = j.at; act.set(j.user_id, o); }
     const r = [...S.profiles.values()].sort((a, b) => (a.nom || "").localeCompare(b.nom || ""));
-    return '<div class="panel"><h3>Rôles</h3><p class="muted" style="margin:0"><b>Administrateur</b> : tout (comptes, engins, stock de départ, paramètres, saisies de tous, demandes d\'achat) · <b>Gestionnaire</b> : crée les demandes d\'achat (DA) et consulte le stock · <b>Magasinier</b> : saisit le N° des DA, entrées et sorties · <b>Saisie</b> : entrées et sorties (filtres et PDR), modifie les siennes · <b>Consultation</b> : lecture seule (sans les DA).</p></div>' + table([
+    return '<div class="panel"><h3>Rôles</h3><p class="muted" style="margin:0"><b>Administrateur</b> : tout (comptes, engins, stock de départ, paramètres, saisies de tous, demandes d\'achat) · <b>Gestionnaire</b> : crée les demandes d\'achat (DA) et consulte le stock · <b>Magasinier</b> : crée les DA, saisit le N° des DA, entrées et sorties · <b>Saisie</b> : entrées et sorties (filtres et PDR), modifie les siennes · <b>Consultation</b> : lecture seule (sans les DA).</p></div>' + table([
       { h: "Nom", f: p => who(p.id) }, { h: "Identifiant", f: p => mono(p.identifiant) }, { h: "Fonction", f: p => esc(p.fonction) }, { h: "Rôle", f: p => '<span class="role ' + (p.role === "admin" ? "admin" : "") + '">' + esc(ROLE_FR[p.role] || p.role) + "</span>" },
       { h: "État", f: p => p.actif ? '<span class="pill p-ok">Actif</span>' : '<span class="pill p-crit">Désactivé</span>' }, { h: "Actions (récentes)", n: 1, f: p => nb((act.get(p.id) || {}).n || 0) }, { h: "Dernière action", f: p => fDT((act.get(p.id) || {}).last) },
       { h: "Dernière visite", f: p => fDT(p.last_seen) }, { h: "", f: p => '<div class="rowact"><button class="btn small" data-act="edit-user" data-id="' + esc(p.id) + '">Modifier</button><button class="btn small" data-act="pw-user" data-id="' + esc(p.id) + '">Mot de passe</button></div>' }], r, { empty: "Aucun compte." }); } };
@@ -544,7 +544,7 @@ const mapDA = r => ({ id: r.id, date: r.date_da || "", engin: r.engin || "", obj
 const mapDL = r => ({ id: r.id, da: r.da_id, poste: r.poste || "", designation: r.designation || "", ref: r.ref || "", qte: r.qte, unite: r.unite || "", engin: r.engin || "", obs: r.obs || "" });
 const daLines = id => [...S.daL.values()].filter(l => l.da === id).sort((a, b) => a.id - b.id);
 const daLabel = d => d.numero ? "DA " + d.numero : "Demande #" + d.id;
-const canEditDA = d => d.statut === "en_attente" && (S.isAdmin || (S.role === "gestionnaire" && d.createdBy === S.uid));
+const canEditDA = d => d.statut === "en_attente" && (S.isAdmin || (["gestionnaire", "magasinier"].includes(S.role) && d.createdBy === S.uid));
 const daPending = () => [...S.da.values()].filter(d => d.statut === "en_attente");
 const enginTxt = code => { if (!code) return ""; const e = S.engins.get(String(code)); return e ? [e.designation, e.marque, e.modele].filter(Boolean).join(" ") : ""; };
 const daPill = d => d.statut === "numerotee" ? '<span class="pill p-ok">N° ' + esc(d.numero) + "</span>" : '<span class="pill p-warn">En attente du N° DA</span>';
@@ -619,7 +619,7 @@ function daForm(d) {
     if (isNew) { const r = await must(sb.from("da").insert({ date_da: date, engin: eng }).select().single());
       try { const ls = await must(sb.from("da_lignes").insert(rows.map(x => Object.assign({ da_id: r.id }, x))).select()); S.da.set(r.id, mapDA(r)); ls.forEach(l => S.daL.set(l.id, mapDL(l))); }
       catch (e) { await sb.from("da").delete().eq("id", r.id); throw e; }
-      schedule(); toast("Demande d'achat #" + r.id + " créée (" + rows.length + " ligne(s)). Le magasinier et l'administrateur sont notifiés."); return; }
+      schedule(); toast("Demande d'achat #" + r.id + " créée (" + rows.length + " ligne(s)). Les personnes chargées du N° DA sont notifiées."); return; }
     const r = await must(sb.from("da").update({ date_da: date, engin: eng }).eq("id", d.id).select().single());
     await must(sb.from("da_lignes").delete().eq("da_id", d.id)); daLines(d.id).forEach(l => S.daL.delete(l.id));
     const ls = await must(sb.from("da_lignes").insert(rows.map(x => Object.assign({ da_id: d.id }, x))).select());
@@ -654,7 +654,7 @@ const DA_COLS = [["date", "Date", ["date", "datedemande", "dateda"]], ["num", "D
   ["designation", "Désignation Catalogue", ["designationcatalogue", "designation", "libelle", "article", "description"]], ["ref", "Référance", ["referance", "reference", "ref", "codearticle", "refpiece", "referencefiltre"]],
   ["qte", "Quantité", ["quantite", "qte", "qtedemandee", "quantitedemandee"]], ["unite", "Unité", ["unite", "unites", "um", "udm", "uniteqte", "unitedemesure"]], ["engin", "Code_Engin", ["codeengin", "engin", "codeengins", "enginconcerne"]]];
 function daImportDialog() {
-  if (!S.canCreateDA) { toast("Seuls l'administrateur et le gestionnaire créent des demandes d'achat."); return; }
+  if (!S.canCreateDA) { toast("Seuls l'administrateur, le gestionnaire et le magasinier créent des demandes d'achat."); return; }
   let groups = [];
   const html = '<p class="muted" style="margin-top:0">Choisissez votre tableau de demande d\'achat (.xlsx, .xls ou .csv) au format du canevas : <b>Date · DA · N° Poste · Désignation Catalogue · Référance · Quantité · Unité · Code_Engin</b> (la colonne Unité est facultative). Chaque feuille devient une demande ; si la colonne DA contient plusieurs numéros, une demande est créée par numéro.</p>' +
     '<div class="tools" style="margin-bottom:8px">' + F("di-file", "Fichier", '<input id="di-file" type="file" accept=".xlsx,.xls,.xlsm,.csv">') + '<span class="grow"></span><button type="button" class="btn" data-act="da-tpl">Télécharger le canevas DA</button></div><div id="di-prev" class="imp-prev"></div>';
@@ -832,7 +832,7 @@ async function startApp() {
   await loadProfiles(); const me = S.me;
   if (!me || !me.actif) { await sb.auth.signOut(); showLogin("Ce compte n'est pas actif. Contactez l'administrateur."); return; }
   S.role = me.role; S.isAdmin = me.role === "admin"; S.canWrite = S.isAdmin || me.role === "saisie" || me.role === "magasinier";
-  S.canDA = ["admin", "gestionnaire", "magasinier"].includes(me.role); S.canCreateDA = ["admin", "gestionnaire"].includes(me.role); S.canNumDA = ["admin", "magasinier"].includes(me.role); S.lastSeen = me.last_seen || null;
+  S.canDA = ["admin", "gestionnaire", "magasinier"].includes(me.role); S.canCreateDA = ["admin", "gestionnaire", "magasinier"].includes(me.role); S.canNumDA = ["admin", "magasinier"].includes(me.role); S.lastSeen = me.last_seen || null;
   $("#me-box").innerHTML = '<span class="who">' + avatar(S.uid) + '<span class="nm">' + esc(me.nom || me.identifiant) + "</span></span>" + '<span class="role ' + (S.isAdmin ? "admin" : "") + '">' + esc(ROLE_FR[me.role]) + '</span><button class="btn small" data-act="logout">Déconnexion</button>';
   try { const v = localStorage.getItem("fc-view"); if (v && VIEWS[v] && (v !== "users" || S.isAdmin) && (!["da", "suivida"].includes(v) || S.canDA)) S.view = v; const c = localStorage.getItem("fc-cat"); if (c === "PDR" || c === "FILTRE") S.f.cat = c; } catch (_) {}
   const [eng, dep, ent, sor, par, jr] = await Promise.all([fetchAll("engins", "code"), fetchAll("stock_depart", "id"), fetchAll("entrees", "id"), fetchAll("sorties", "id"),
