@@ -56,7 +56,7 @@ const S = {
 let C = null;
 
 /* ---------- correspondance base <-> application ---------- */
-const mapE = r => ({ id: r.id, cat: catOf(r.categorie), date: r.date, ref: r.ref, type: r.type || "", marque: r.marque || "", equiv: r.equiv || "", dem: r.qte_bc, liv: r.qte_bl, bc: r.num_bc || "", bl: r.num_bl || "", engin: r.engin || "", obs: r.obs || "", source: r.source, createdAt: r.created_at, createdBy: r.created_by, updatedAt: r.updated_at, updatedBy: r.updated_by });
+const mapE = r => ({ id: r.id, fourn: r.fournisseur || "", cat: catOf(r.categorie), date: r.date, ref: r.ref, type: r.type || "", marque: r.marque || "", equiv: r.equiv || "", dem: r.qte_bc, liv: r.qte_bl, bc: r.num_bc || "", bl: r.num_bl || "", engin: r.engin || "", obs: r.obs || "", source: r.source, createdAt: r.created_at, createdBy: r.created_by, updatedAt: r.updated_at, updatedBy: r.updated_by });
 const mapS = r => ({ id: r.id, cat: catOf(r.categorie), date: r.date, engin: r.engin || "", enginInit: r.engin_initial || "", compteur: r.compteur, intervention: r.intervention || "", ref: r.ref, qte: r.qte, atelier: r.atelier || "", obs: r.obs || "", source: r.source, createdAt: r.created_at, createdBy: r.created_by, updatedAt: r.updated_at, updatedBy: r.updated_by });
 const mapG = r => ({ code: String(r.code), designation: r.designation || "", marque: r.marque || "", modele: r.modele || "", serie: r.serie || "", unite: r.unite || "", intervalle: r.intervalle, statut: r.statut || "",
   refs: { huile: r.ref_huile || "", gasoil: r.ref_gasoil || "", separateur: r.ref_separateur || "", airP: r.ref_air_p || "", airS: r.ref_air_s || "", hydraulique: r.ref_hydraulique || "", transmission: r.ref_transmission || "" } });
@@ -213,14 +213,14 @@ VIEWS.stock = { title: () => "Stock actuel" + (S.f.stockCat ? " – " + CATS[S.f
     { h: "Statut", f: l => pill(l.statut) }, { h: "Dern. entrée", f: l => fD(l.lastE) }, { h: "Dern. sortie", f: l => fD(l.lastS) }], r, { empty: "Aucune ligne." }); } };
 
 VIEWS.entrees = { title: () => "Entrées – " + CATS[S.f.cat].label,
-  tools: () => catTabs(S.f.cat) + '<div class="tools">' + searchF("en-q", S.f.entQ, "Réf., BC, BL, engin…") + field("en-s", "Livraison", '<select id="en-s"><option value="">Toutes</option><option value="att">Non livrées (reste &gt; 0)</option><option value="liv">Livrées</option></select>') +
+  tools: () => catTabs(S.f.cat) + '<div class="tools">' + searchF("en-q", S.f.entQ, "Réf., BC, BL, fournisseur, engin…") + field("en-s", "Livraison", '<select id="en-s"><option value="">Toutes</option><option value="att">Non livrées (reste &gt; 0)</option><option value="liv">Livrées</option></select>') +
     field("en-f", "Du", '<input id="en-f" type="date" value="' + esc(S.f.entFrom) + '">') + field("en-t", "Au", '<input id="en-t" type="date" value="' + esc(S.f.entTo) + '">') + '<span class="grow"></span><button class="btn" data-act="xls-ent">Exporter Excel</button>' +
     (S.canWrite ? '<button class="btn" data-act="imp-entrees">Importer Excel</button><button class="btn primary" data-act="new-entree">+ Nouvelle entrée</button>' : "") + "</div>",
   bind() { $("#en-s").value = S.f.entSt; ["en-q", "en-s", "en-f", "en-t"].forEach(id => $("#" + id).addEventListener(id === "en-q" ? "input" : "change", () => { S.f.entQ = $("#en-q").value; S.f.entSt = $("#en-s").value; S.f.entFrom = $("#en-f").value; S.f.entTo = $("#en-t").value; render(); })); },
-  rows() { const q = norm(S.f.entQ); return C.ent.filter(e => e.cat === S.f.cat && inPeriod(e.date, S.f.entFrom, S.f.entTo) && (!S.f.entSt || (S.f.entSt === "att" ? e.reste > 0 : e.livre)) && (!q || norm([e.ref, e.type, e.marque, e.bc, e.bl, e.engin, e.obs].join(" ")).includes(q))).reverse(); },
+  rows() { const q = norm(S.f.entQ); return C.ent.filter(e => e.cat === S.f.cat && inPeriod(e.date, S.f.entFrom, S.f.entTo) && (!S.f.entSt || (S.f.entSt === "att" ? e.reste > 0 : e.livre)) && (!q || norm([e.ref, e.type, e.marque, e.bc, e.bl, e.fourn, e.engin, e.obs].join(" ")).includes(q))).reverse(); },
   body() { const r = this.rows(), K = CATS[S.f.cat]; return '<div class="more">' + r.length + " ligne(s) · " + nb(r.reduce((t, e) => t + N(e.liv), 0)) + " " + K.many + " livré(e)s · reste à livrer " + nb(r.reduce((t, e) => t + e.reste, 0)) + ". Seule la quantité livrée (BL) entre dans le stock.</div>" + table([
     { h: "Date", f: e => fD(e.date) }, { h: "Référence", f: e => mono(e.ref) }, { h: K.type, f: e => esc(e.type) }, { h: "Marque", f: e => esc(e.marque) }, { h: "Qté BC", n: 1, f: e => nb(e.dem) }, { h: "Qté BL", n: 1, f: e => nb(e.liv) },
-    { h: "Reste", n: 1, f: e => e.reste > 0 ? '<span class="reste">' + nb(e.reste) + "</span>" : "" }, { h: "N° BC", f: e => mono(e.bc) }, { h: "N° BL", f: e => mono(e.bl) }, { h: "Engin destinataire", f: e => esc(e.engin || "Stock commun") },
+    { h: "Reste", n: 1, f: e => e.reste > 0 ? '<span class="reste">' + nb(e.reste) + "</span>" : "" }, { h: "N° BC", f: e => mono(e.bc) }, { h: "N° BL", f: e => mono(e.bl) }, { h: "Fournisseur", f: e => esc(e.fourn) }, { h: "Engin destinataire", f: e => esc(e.engin || "Stock commun") },
     { h: "Observations", f: e => esc(e.obs) }, { h: "Saisi par", f: e => who(e.createdBy) }, { h: "", f: e => rowActs("entree", e) }], r, { empty: "Aucune entrée de " + K.many + "." }); } };
 
 VIEWS.sorties = { title: () => "Sorties – " + CATS[S.f.cat].label,
@@ -341,13 +341,13 @@ function entreeForm(d, recv) { d = d || { date: today(), cat: S.f.cat }; const i
     F("f-type", "Désignation / type", '<input id="f-type" list="dl-types" value="' + esc(d.type) + '">') + F("f-marque", "Marque", '<input id="f-marque" list="dl-marques" value="' + esc(d.marque) + '">') + F("f-equiv", "Réf. équivalentes", '<input id="f-equiv" value="' + esc(d.equiv) + '">') +
     F("f-engin", "Engin destinataire (vide = stock commun)", '<input id="f-engin" list="dl-engins" value="' + esc(d.engin) + '">') + F("f-dem", "Qté demandée (BC)", '<input id="f-dem" type="number" min="0" step="any" inputmode="decimal" value="' + esc(d.dem ?? "") + '">') +
     F("f-liv", "Qté livrée (BL)", '<input id="f-liv" type="number" min="0" step="any" inputmode="decimal" value="' + esc(d.liv ?? "") + '"><div class="hint">Vide = pas encore livré. Livraison partielle : cumulez ici.</div>') +
-    F("f-bc", "N° BC", '<input id="f-bc" value="' + esc(d.bc) + '">') + F("f-bl", "N° BL", '<input id="f-bl" value="' + esc(d.bl) + '">') + F("f-obs", "Observations", '<input id="f-obs" value="' + esc(d.obs) + '">', "full") + '<div class="hint full" id="f-info"></div></div>';
+    F("f-bc", "N° BC", '<input id="f-bc" value="' + esc(d.bc) + '">') + F("f-bl", "N° BL", '<input id="f-bl" value="' + esc(d.bl) + '">') + F("f-fourn", "Fournisseur", '<input id="f-fourn" list="dl-fourn" value="' + esc(d.fourn) + '">') + F("f-obs", "Observations", '<input id="f-obs" value="' + esc(d.obs) + '">', "full") + '<div class="hint full" id="f-info"></div></div>';
   const ov = modal(isNew ? "Nouvelle entrée" : (recv ? "Réception (BL)" : "Modifier l'entrée"), html, async ov => {
     const ref = fv(ov, "f-ref"); if (!ref) return "Saisissez la référence."; if (!fv(ov, "f-date")) return "Saisissez la date.";
     const dem = fnum(ov, "f-dem"), liv = fnum(ov, "f-liv"); if (dem === null && liv === null) return "Saisissez au moins la quantité demandée (BC) ou livrée (BL).";
     if ((dem !== null && dem < 0) || (liv !== null && liv < 0)) return "Les quantités ne peuvent pas être négatives.";
     const eng = fv(ov, "f-engin"); if (eng && !C.engMap.has(eng)) return "Code engin inconnu : choisissez-le dans la liste (ou laissez vide pour le stock commun).";
-    const row = { categorie: fv(ov, "f-cat"), date: fv(ov, "f-date"), ref, type: fv(ov, "f-type") || null, marque: fv(ov, "f-marque") || null, equiv: fv(ov, "f-equiv") || null, qte_bc: dem, qte_bl: liv, num_bc: fv(ov, "f-bc") || null, num_bl: fv(ov, "f-bl") || null, engin: eng || null, obs: fv(ov, "f-obs") || null };
+    const row = { categorie: fv(ov, "f-cat"), date: fv(ov, "f-date"), ref, type: fv(ov, "f-type") || null, marque: fv(ov, "f-marque") || null, equiv: fv(ov, "f-equiv") || null, qte_bc: dem, qte_bl: liv, num_bc: fv(ov, "f-bc") || null, num_bl: fv(ov, "f-bl") || null, fournisseur: fv(ov, "f-fourn") || null, engin: eng || null, obs: fv(ov, "f-obs") || null };
     if (isNew) { applyRow("entrees", await must(sb.from("entrees").insert(row).select().single())); toast("Entrée enregistrée."); }
     else { const r = await must(sb.from("entrees").update(row).eq("id", d.id).select()); if (!r.length) return "Modification refusée : vos droits ne le permettent pas."; applyRow("entrees", r[0]); toast("Entrée modifiée."); }
   }, recv ? "Enregistrer la réception" : "Enregistrer");
@@ -407,7 +407,7 @@ const IMPORT = {
     cols: [["cat", "Catégorie", ["categorie", "cat", "famille"]], ["date", "Date", ["date", "datereception", "datebl"]], ["ref", "Référence", ["reference", "ref", "referencefiltre", "referencepiece", "refpiece", "refpdr", "codearticle", "article"]],
       ["type", "Désignation / type", ["designation", "type", "typedefiltre", "libelle", "desig", "designationdelapiece"]], ["marque", "Marque", ["marque", "fabricant"]], ["equiv", "Réf. équivalentes", ["refequivalentes", "refequivalente", "equivalence", "equiv", "refequiv"]],
       ["dem", "Qté demandée (BC)", ["qtedemandeebc", "qtedemandee", "qtebc", "quantitedemandee", "qtecommandee", "quantitecommandee"]], ["liv", "Qté livrée (BL)", ["qtelivreebl", "qtelivree", "qtebl", "quantitelivree", "quantite", "qte"]],
-      ["bc", "N° BC", ["nbc", "numbc", "numerobc", "bc", "bondecommande", "nbondecommande"]], ["bl", "N° BL", ["nbl", "numbl", "numerobl", "bl", "bondelivraison", "nbondelivraison"]],
+      ["bc", "N° BC", ["nbc", "numbc", "numerobc", "bc", "bondecommande", "nbondecommande"]], ["bl", "N° BL", ["nbl", "numbl", "numerobl", "bl", "bondelivraison", "nbondelivraison"]], ["fourn", "Fournisseur", ["fournisseur", "fournisseurs", "frs", "fourn", "nomfournisseur"]],
       ["engin", "Engin destinataire", ["engindestinataireaffectation", "engindestinataire", "codeengin", "engin", "affectation"]], ["obs", "Observations", ["observations", "observation", "obs", "remarque", "remarques", "commentaire"]]],
     example: [["Filtre", "08/10/2026", "P550820", "FILTRE A HUILE", "DONALDSON", "", 5, 5, "4400044415", "BL-1201", "50406", "Exemple – à supprimer"], ["PDR", "08/10/2026", "4130000418", "COURROIE ALTERNATEUR", "SDLG", "", 2, 1, "4400044420", "BL-1202", "44645", "Exemple – à supprimer"]] },
   sorties: { table: "sorties", title: "Importer des sorties", need: "write",
@@ -452,7 +452,7 @@ function buildRow(kind, cells, map, defCat) {
     const dem = pNum(g("dem")), liv = pNum(g("liv"));
     if (Number.isNaN(dem) || Number.isNaN(liv)) errs.push("quantité non numérique"); else if (dem === null && liv === null) errs.push("aucune quantité (BC ou BL)"); else if ((dem ?? 0) < 0 || (liv ?? 0) < 0) errs.push("quantité négative");
     if (eng && !C.engMap.has(eng)) errs.push("engin " + eng + " inconnu");
-    row = { categorie: cat, date: dt.v, ref, type: pStr(g("type")) || null, marque: pStr(g("marque")) || null, equiv: pStr(g("equiv")) || null, qte_bc: Number.isNaN(dem) ? null : dem, qte_bl: Number.isNaN(liv) ? null : liv, num_bc: pStr(g("bc")) || null, num_bl: pStr(g("bl")) || null, engin: eng || null, obs: pStr(g("obs")) || null };
+    row = { categorie: cat, date: dt.v, ref, type: pStr(g("type")) || null, marque: pStr(g("marque")) || null, equiv: pStr(g("equiv")) || null, qte_bc: Number.isNaN(dem) ? null : dem, qte_bl: Number.isNaN(liv) ? null : liv, num_bc: pStr(g("bc")) || null, num_bl: pStr(g("bl")) || null, fournisseur: pStr(g("fourn")) || null, engin: eng || null, obs: pStr(g("obs")) || null };
     if (!errs.length && C.ent.some(e => e.cat === cat && e.ref === ref && e.date === dt.v && (e.bl || "") === (row.num_bl || "") && N(e.liv) === N(liv) && N(e.dem) === N(dem))) warns.push("doublon possible (déjà saisi)");
   } else if (kind === "sorties") {
     const qte = pNum(g("qte")), cpt = pNum(g("compteur")), init = pStr(g("enginInit"));
@@ -797,7 +797,7 @@ document.addEventListener("click", async e => { const b = e.target.closest("[dat
     if (a === "logout") { await sb.auth.signOut(); location.reload(); return; }
     const catName = c => c === "PDR" ? "PDR" : "Filtre";
     if (a === "xls-stock") return xls("Stock_" + (S.f.stockCat || "filtres_PDR") + "_" + today() + ".xlsx", "Stock actuel", VIEWS.stock.rows().map(l => ({ "Catégorie": catName(l.cat), "Affectation": l.engin || "Commun", "Engin": l.label, "Référence": l.ref, "Désignation / type": l.type, "Marque": l.marque, "Réf. équiv.": l.equiv, "Départ": l.dep, "Entrées": l.ent, "Sorties": l.sor, "Stock": l.stock, "Seuil": l.seuil, "Statut": l.statut, "Dernière entrée": fD(l.lastE), "Dernière sortie": fD(l.lastS) })));
-    if (a === "xls-ent") return xls("Entrees_" + S.f.cat + "_" + today() + ".xlsx", "Entrées", VIEWS.entrees.rows().map(x => ({ "Catégorie": catName(x.cat), "Date": fD(x.date), "Référence": x.ref, "Désignation / type": x.type, "Marque": x.marque, "Réf. équivalentes": x.equiv, "Qté demandée (BC)": x.dem ?? "", "Qté livrée (BL)": x.liv ?? "", "Reste à livrer": x.reste || "", "N° BC": x.bc, "N° BL": x.bl, "Engin destinataire": x.engin || "", "Observations": x.obs, "Saisi par": x.createdBy ? nameOf(x.createdBy) : "Import" })));
+    if (a === "xls-ent") return xls("Entrees_" + S.f.cat + "_" + today() + ".xlsx", "Entrées", VIEWS.entrees.rows().map(x => ({ "Catégorie": catName(x.cat), "Date": fD(x.date), "Référence": x.ref, "Désignation / type": x.type, "Marque": x.marque, "Réf. équivalentes": x.equiv, "Qté demandée (BC)": x.dem ?? "", "Qté livrée (BL)": x.liv ?? "", "Reste à livrer": x.reste || "", "N° BC": x.bc, "N° BL": x.bl, "Fournisseur": x.fourn, "Engin destinataire": x.engin || "", "Observations": x.obs, "Saisi par": x.createdBy ? nameOf(x.createdBy) : "Import" })));
     if (a === "xls-sor") return xls("Sorties_" + S.f.cat + "_" + today() + ".xlsx", "Sorties", VIEWS.sorties.rows().map(s => ({ "Catégorie": catName(s.cat), "Date": fD(s.date), "Code engin (monté sur)": s.engin, "Engin": s.label, "Engin initial": s.enginInit, "Compteur (h / km)": s.compteur ?? "", "Type d'intervention": s.intervention, "Référence": s.ref, "Désignation / type": s.type, "Quantité": s.qte, "Pris sur": mvtLabel(s), "Atelier": s.atelier, "Observations": s.obs, "Saisi par": s.createdBy ? nameOf(s.createdBy) : "Import" })));
   } catch (err) { toast(errMsg(err)); }
 });
@@ -818,6 +818,7 @@ function fillLists() {
   $("#dl-refs").innerHTML = C.refs.map(r => { const i = C.info(r); return '<option value="' + esc(r) + '">' + esc((i.cat === "PDR" ? "PDR · " : "") + i.type) + "</option>"; }).join("");
   $("#dl-engins").innerHTML = [...S.engins.values()].map(e => '<option value="' + esc(e.code) + '">' + esc([e.designation, e.marque, e.modele].filter(Boolean).join(" ")) + "</option>").join("");
   const t = new Set(S.params.types || []); C.lines.forEach(l => l.type && t.add(l.type)); $("#dl-types").innerHTML = [...t].map(x => '<option value="' + esc(x) + '">').join("");
+  const fo = new Set(); C.ent.forEach(e => e.fourn && fo.add(e.fourn)); $("#dl-fourn").innerHTML = [...fo].sort().map(x => '<option value="' + esc(x) + '">').join("");
   const m = new Set(); C.lines.forEach(l => l.marque && m.add(l.marque)); $("#dl-marques").innerHTML = [...m].map(x => '<option value="' + esc(x) + '">').join("");
 }
 function setSync(ok, txt) { $("#sync-dot").classList.toggle("on", ok); $("#sync-txt").textContent = txt; }
