@@ -161,3 +161,18 @@ tr.row-err td{background:var(--crit-soft)}
 .le .dl-qte{text-align:right}
 .btn.small.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 .imp-prev h4{margin:14px 0 6px;font-size:13px}
+
+/* --- Gestion huiles : barres --- */
+.hbars{display:flex;flex-direction:column;gap:7px}
+.hb{display:grid;grid-template-columns:minmax(120px,38%) 1fr auto;gap:10px;align-items:center;font-size:13px}
+.hb-l{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hb-t{background:var(--petrol-soft);border-radius:4px;height:14px;overflow:hidden}
+.hb-t i{display:block;height:100%;background:var(--petrol);border-radius:0 4px 4px 0}
+.hb-v{font-variant-numeric:tabular-nums;font-weight:600;white-space:nowrap}.hb-v small{font-weight:400;color:var(--muted)}
+.vbars{display:grid;grid-template-columns:repeat(12,1fr);gap:6px;align-items:end;height:190px}
+.vb{display:flex;flex-direction:column;align-items:center;height:100%;font-size:11px}
+.vb-v{color:var(--muted);height:16px;font-variant-numeric:tabular-nums}
+.vb-t{flex:1;width:100%;max-width:38px;display:flex;align-items:flex-end;border-bottom:1px solid var(--line)}
+.vb-t i{display:block;width:100%;background:var(--petrol);border-radius:4px 4px 0 0}
+.vb-l{color:var(--muted);margin-top:4px}
+@media (max-width:640px){.hb{grid-template-columns:1fr auto}.hb-t{grid-column:1/-1;order:3}}
