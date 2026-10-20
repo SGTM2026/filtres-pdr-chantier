@@ -594,8 +594,8 @@ function confirmBox(text, onYes) { modal("Confirmer", "<p>" + esc(text) + "</p>"
 /* =====================================================================
    DEMANDES D'ACHAT (DA) : création, numérotation par le magasinier, suivi
    ===================================================================== */
-const mapDA = r => ({ id: r.id, date: r.date_da || "", engin: r.engin || "", objet: r.objet || "", statut: r.statut, numero: r.numero_da || "", numAt: r.numero_at, numBy: r.numero_by, createdAt: r.created_at, createdBy: r.created_by, devisPath: r.devis_path || "", devisNom: r.devis_nom || "", numBc: r.num_bc || "", bcAt: r.bc_at, bcBy: r.bc_by });
-const mapDL = r => ({ id: r.id, da: r.da_id, poste: r.poste || "", designation: r.designation || "", ref: r.ref || "", qte: r.qte, qteBc: r.qte_bc, unite: r.unite || "", engin: r.engin || "", obs: r.obs || "" });
+const mapDA = r => ({ id: r.id, date: r.date_da || "", engin: r.engin || "", objet: r.objet || "", statut: r.statut, numero: r.numero_da || "", numAt: r.numero_at, numBy: r.numero_by, createdAt: r.created_at, createdBy: r.created_by, devisPath: r.devis_path || "", devisNom: r.devis_nom || "", numBc: r.num_bc || "", bcAt: r.bc_at, bcBy: r.bc_by, fourn: r.fournisseur || "", numBl: r.num_bl || "", blAt: r.bl_at, blBy: r.bl_by });
+const mapDL = r => ({ id: r.id, da: r.da_id, poste: r.poste || "", designation: r.designation || "", ref: r.ref || "", qte: r.qte, qteBc: r.qte_bc, qteBl: r.qte_bl, equiv: r.equiv || "", marque: r.marque || "", unite: r.unite || "", engin: r.engin || "", obs: r.obs || "" });
 const daLines = id => [...S.daL.values()].filter(l => l.da === id).sort((a, b) => a.id - b.id);
 const daLabel = d => d.numero ? "DA " + d.numero : "Demande #" + d.id;
 const canEditDA = d => d.statut === "en_attente" && (S.isAdmin || (["gestionnaire", "magasinier"].includes(S.role) && d.createdBy === S.uid));
@@ -618,7 +618,7 @@ function daActs(d, where) {
   if (where === "suivi" || where === "bc") h += '<button class="btn small" data-act="da-pdf" data-id="' + d.id + '">PDF</button><button class="btn small" data-act="da-xls" data-id="' + d.id + '">Excel</button>';
   if (S.canNumDA && d.statut === "en_attente") h += '<button class="btn small primary" data-act="da-num" data-id="' + d.id + '">Saisir N° DA</button>';
   if (S.canNumDA && d.statut === "numerotee" && where === "suivi") h += '<button class="btn small" data-act="da-num" data-id="' + d.id + '">Corriger N°</button>';
-  if (S.canNumDA && where === "bc") h += '<button class="btn small" data-act="bc-edit" data-id="' + d.id + '">Modifier BC</button>';
+  if (S.canNumDA && where === "bc" && !d.numBl) h += '<button class="btn small" data-act="bc-edit" data-id="' + d.id + '">Modifier BC</button>';
   if (canEditDA(d)) h += '<button class="btn small" data-act="da-edit" data-id="' + d.id + '">Modifier</button><button class="btn small danger" data-act="da-del" data-id="' + d.id + '">Suppr.</button>';
   return '<div class="rowact">' + h + "</div>";
 }
@@ -629,7 +629,9 @@ function daCols(where) {
     { h: "Activer BC", f: d => S.canNumDA ? '<button class="btn small primary bc-go" data-act="bc-start" data-id="' + d.id + '" title="Saisir le N° de BC">➜ BC</button>' : '<span class="muted">–</span>' }, { h: "", f: d => daActs(d, where) }];
   if (where === "bc") return [{ h: "Date DA", f: d => fD(d.date) }, { h: "N° DA", f: d => "<b>" + mono(d.numero) + "</b>" }, { h: "N° BC", f: d => '<b class="mono">' + esc(d.numBc) + "</b>" },
     { h: "Code engin", f: d => { const c = [...new Set(daLines(d.id).map(l => l.engin).filter(Boolean))]; return c.length ? c.map(mono).join(" ") : (d.engin ? mono(d.engin) : '<span class="muted">–</span>'); } },
-    { h: "Lignes", n: 1, f: d => nb(daLines(d.id).length) }, { h: "", f: d => daActs(d, where) }];
+    { h: "Lignes", n: 1, f: d => nb(daLines(d.id).length) },
+    { h: "Livrée", f: d => d.numBl ? '<span class="pill p-ok" title="Réceptionné le ' + esc(fDT(d.blAt)) + '">✔ BL ' + esc(d.numBl) + "</span>" : (S.canNumDA ? '<button class="btn small primary bc-go" data-act="bl-start" data-id="' + d.id + '" title="Saisir le N° de BL">➜ BL</button>' : '<span class="pill p-warn">En attente</span>') },
+    { h: "", f: d => daActs(d, where) }];
   return [{ h: "Réf. interne", f: d => mono("#" + d.id) }, { h: "Date DA", f: d => fD(d.date) },
     { h: "Engin", f: d => d.engin ? mono(d.engin) + ' <span class="muted">' + esc(enginTxt(d.engin)) + "</span>" : '<span class="muted">Plusieurs</span>' },
     { h: "Lignes", n: 1, f: d => nb(daLines(d.id).length) }, { h: "Qté totale", n: 1, f: d => nb(daLines(d.id).reduce((t, l) => t + N(l.qte), 0)) },
@@ -672,13 +674,14 @@ VIEWS.suivibc = { title: "Suivi BC",
 /* ---------- activation du bon de commande (magasinier / administrateur) ---------- */
 function bcStart(d) {
   if (!S.canNumDA) return;
-  modal("Saisir le N° de BC – DA " + d.numero, F("bc-num", "N° de BC *", '<input id="bc-num" value="' + esc(d.numBc) + '" placeholder="ex. 4400012345" autocomplete="off">'),
-    async ov => { const num = fv(ov, "bc-num"); if (!num) return "Saisissez le N° de BC."; setTimeout(() => bcQtyForm(d, num), 0); }, "Valider le N° BC");
+  modal("Saisir le N° de BC – DA " + d.numero, '<div class="fgrid">' + F("bc-num", "N° de BC *", '<input id="bc-num" value="' + esc(d.numBc) + '" placeholder="ex. 4400012345" autocomplete="off">') +
+    F("bc-f", "Fournisseur", '<input id="bc-f" list="dl-fourn" value="' + esc(d.fourn) + '" autocomplete="off">') + "</div>",
+    async ov => { const num = fv(ov, "bc-num"); if (!num) return "Saisissez le N° de BC."; const fo = fv(ov, "bc-f"); setTimeout(() => bcQtyForm(d, num, fo), 0); }, "Valider le N° BC");
 }
-function bcQtyForm(d, num) {
+function bcQtyForm(d, num, fourn) { if (fourn === undefined) fourn = d.fourn;
   const L = daLines(d.id), codes = [...new Set(L.map(l => l.engin).filter(Boolean))];
   const head = '<div class="bc-head">' + (codes.length ? codes.map(c => '<div class="chip"><b class="mono">' + esc(c) + "</b> " + esc(enginTxt(c)) + "</div>").join("") : '<span class="muted">Code engin non précisé</span>') + "</div>";
-  const html = head + '<div class="fgrid">' + F("bq-num", "N° BC *", '<input id="bq-num" value="' + esc(num) + '">') + F("bq-da", "N° DA", '<input id="bq-da" value="' + esc(d.numero) + '" readonly>') + "</div>" +
+  const html = head + '<div class="fgrid">' + F("bq-num", "N° BC *", '<input id="bq-num" value="' + esc(num) + '">') + F("bq-da", "N° DA", '<input id="bq-da" value="' + esc(d.numero) + '" readonly>') + F("bq-f", "Fournisseur", '<input id="bq-f" list="dl-fourn" value="' + esc(fourn) + '">') + "</div>" +
     '<div class="tw le"><table><thead><tr><th>N° Poste</th><th>Désignation Catalogue</th><th>Référence</th><th>Unité</th><th class="n">Qté DA</th><th class="n" style="width:110px">Qté BC *</th></tr></thead><tbody>' +
     L.map(l => '<tr data-l="' + l.id + '"><td>' + esc(l.poste) + "</td><td>" + esc(l.designation) + "</td><td>" + mono(l.ref) + "</td><td>" + esc(l.unite) + '</td><td class="n"><b>' + nb(l.qte) + '</b></td><td><input class="bq-q" type="number" min="0" step="any" value="' + esc(l.qteBc ?? l.qte) + '"></td></tr>').join("") +
     '</tbody></table></div><p class="hint">Qté BC proposée = qté DA ; modifiez-la si le bon de commande diffère.</p>';
@@ -686,8 +689,37 @@ function bcQtyForm(d, num) {
     const vals = [...ov.querySelectorAll("tr[data-l]")].map(tr => ({ id: +tr.dataset.l, q: tr.querySelector(".bq-q").value.trim() }));
     if (vals.some(v => v.q === "" || !(+v.q.replace(",", ".") >= 0))) return "Saisissez une quantité BC valide sur chaque ligne (0 si l'article n'est pas commandé).";
     for (const v of vals) { const r = await must(sb.from("da_lignes").update({ qte_bc: +v.q.replace(",", ".") }).eq("id", v.id).select()); if (!r.length) throw new Error("permission denied"); S.daL.set(r[0].id, mapDL(r[0])); }
-    const r = await must(sb.from("da").update({ num_bc: n2 }).eq("id", d.id).select().single()); S.da.set(r.id, mapDA(r)); schedule(); toast("BC " + n2 + " activé pour la DA " + d.numero + " : il est dans « Suivi BC »."); }, "Valider", true);
+    const r = await must(sb.from("da").update({ num_bc: n2, fournisseur: fv(ov, "bq-f") || null }).eq("id", d.id).select().single()); S.da.set(r.id, mapDA(r)); schedule(); toast("BC " + n2 + " activé pour la DA " + d.numero + " : il est dans « Suivi BC »."); }, "Valider", true);
   const b = ov.querySelector(".bq-q"); if (b) { b.focus(); b.select(); }
+}
+
+/* ---------- réception : N° BL → quantités livrées → entrées magasin (magasinier / administrateur) ---------- */
+function blStart(d) {
+  if (!S.canNumDA || d.numBl) return;
+  modal("Saisir le N° de BL – BC " + d.numBc, '<div class="fgrid">' + F("bl-num", "N° de BL *", '<input id="bl-num" autocomplete="off">') + F("bl-f", "Fournisseur", '<input id="bl-f" value="' + esc(d.fourn || "–") + '" readonly>') + "</div>",
+    async ov => { const num = fv(ov, "bl-num"); if (!num) return "Saisissez le N° de BL."; setTimeout(() => blQtyForm(d, num), 0); }, "Valider le N° BL");
+}
+function blQtyForm(d, num) {
+  const L = daLines(d.id), codes = [...new Set(L.map(l => l.engin).filter(Boolean))];
+  const head = '<div class="bc-head">' + (codes.length ? codes.map(c => '<div class="chip"><b class="mono">' + esc(c) + "</b> " + esc(enginTxt(c)) + "</div>").join("") : "") + '<div class="chip">BC <b>' + esc(d.numBc) + "</b></div>" + (d.fourn ? '<div class="chip">Fournisseur <b>' + esc(d.fourn) + "</b></div>" : "") + "</div>";
+  const info = l => (C && l.ref ? C.info(l.ref) : null) || {};
+  const html = head + '<div class="fgrid">' + F("bl-n2", "N° BL *", '<input id="bl-n2" value="' + esc(num) + '">') + F("bl-date", "Date de réception", '<input id="bl-date" type="date" value="' + today() + '">') + "</div>" +
+    '<div class="tw le"><table><thead><tr><th style="width:110px">Catégorie</th><th>N° Poste</th><th>Désignation Catalogue</th><th>Référence</th><th style="width:130px">Référence équi.</th><th style="width:120px">Marque</th><th>Unité</th><th class="n">Qté BC</th><th class="n" style="width:100px">Qté BL *</th><th>Code_Engin</th></tr></thead><tbody>' +
+    L.map(l => { const i = info(l); return '<tr data-l="' + l.id + '"><td><select class="bl-cat"><option value="FILTRE"' + (i.cat !== "PDR" ? " selected" : "") + '>Filtre</option><option value="PDR"' + (i.cat === "PDR" ? " selected" : "") + '>PDR</option></select></td><td>' + esc(l.poste) + "</td><td>" + esc(l.designation) + "</td><td>" + mono(l.ref) +
+      '</td><td><input class="bl-eq" value="' + esc(l.equiv || i.equiv || "") + '"></td><td><input class="bl-ma" list="dl-marques" value="' + esc(l.marque || i.marque || "") + '"></td><td>' + esc(l.unite) + '</td><td class="n"><b>' + nb(l.qteBc ?? l.qte) + '</b></td><td><input class="bl-q" type="number" min="0" step="any" value="' + esc(l.qteBl ?? l.qteBc ?? l.qte) + '"></td><td>' + mono(l.engin) + "</td></tr>"; }).join("") +
+    '</tbody></table></div><p class="hint">À la validation, chaque ligne livrée (Qté BL &gt; 0) est ajoutée dans <b>Entrées (BC / BL)</b> avec le N° BC, le N° BL, le fournisseur et l\'engin destinataire. Une livraison partielle laisse le reste à livrer visible dans les entrées.</p>';
+  const ov = modal("BL " + num + " – réception du BC " + d.numBc, html, async ov => {
+    const nbl = fv(ov, "bl-n2"), date = fv(ov, "bl-date") || today(); if (!nbl) return "Saisissez le N° de BL.";
+    const vals = [...ov.querySelectorAll("tr[data-l]")].map(tr => ({ l: S.daL.get(+tr.dataset.l), cat: tr.querySelector(".bl-cat").value, eq: tr.querySelector(".bl-eq").value.trim(), ma: tr.querySelector(".bl-ma").value.trim(), q: tr.querySelector(".bl-q").value.trim() }));
+    if (vals.some(v => v.q === "" || !(+v.q.replace(",", ".") >= 0))) return "Saisissez une quantité BL valide sur chaque ligne (0 si l'article n'est pas livré).";
+    const bad = vals.find(v => +v.q.replace(",", ".") > 0 && !v.l.ref && !v.l.designation); if (bad) return "Une ligne livrée n'a ni référence ni désignation.";
+    for (const v of vals) { const r = await must(sb.from("da_lignes").update({ qte_bl: +v.q.replace(",", "."), equiv: v.eq || null, marque: v.ma || null }).eq("id", v.l.id).select()); if (!r.length) throw new Error("permission denied"); S.daL.set(r[0].id, mapDL(r[0])); }
+    const rows = vals.filter(v => +v.q.replace(",", ".") > 0).map(v => ({ categorie: v.cat, date, ref: v.l.ref || v.l.designation, type: v.l.designation || null, marque: v.ma || null, equiv: v.eq || null,
+      qte_bc: v.l.qteBc ?? v.l.qte, qte_bl: +v.q.replace(",", "."), num_bc: d.numBc, num_bl: nbl, fournisseur: d.fourn || null, engin: v.l.engin && S.engins.has(v.l.engin) ? v.l.engin : null, obs: "DA " + d.numero }));
+    if (rows.length) { const ins = await must(sb.from("entrees").insert(rows).select()); ins.forEach(r => applyRow("entrees", r)); }
+    const r = await must(sb.from("da").update({ num_bl: nbl }).eq("id", d.id).select().single()); S.da.set(r.id, mapDA(r)); schedule();
+    toast("BL " + nbl + " réceptionné : " + rows.length + " article(s) ajouté(s) dans Entrées (BC / BL)."); }, "Valider", true);
+  const b = ov.querySelector(".bl-q"); if (b) { b.focus(); b.select(); }
 }
 
 /* ---------- formulaire DA ---------- */
@@ -741,8 +773,8 @@ function daView(d) {
   const L = daLines(d.id);
   const html = '<div class="kpis">' + kpi("Statut", d.statut === "numerotee" ? "N° " + esc(d.numero) : "En attente", d.statut === "numerotee" ? "txt" : "warn") + kpi("Date DA", fD(d.date), "txt") + kpi("Lignes", nb(L.length)) + kpi("Qté totale", nb(L.reduce((t, l) => t + N(l.qte), 0))) + "</div>" +
     '<p class="muted">' + (d.engin ? "Engin principal : <b>" + esc(d.engin) + "</b> " + esc(enginTxt(d.engin)) + " · " : "") + (d.objet ? "Objet : " + esc(d.objet) + " · " : "") + "Demandeur : " + esc(nameOf(d.createdBy)) + " · créée le " + fDT(d.createdAt) + (d.numAt ? " · N° saisi par " + esc(nameOf(d.numBy)) + " le " + fDT(d.numAt) : "") + "</p>" +
-    (d.numBc ? '<div class="banner ok">Bon de commande <b>' + esc(d.numBc) + "</b> activé par " + esc(nameOf(d.bcBy)) + " le " + fDT(d.bcAt) + "</div>" : "") +
-    table([{ h: "N° Poste", f: l => esc(l.poste) }, { h: "Désignation Catalogue", f: l => esc(l.designation) }, { h: "Référence", f: l => mono(l.ref) }, { h: d.numBc ? "Qté DA" : "Quantité", n: 1, f: l => "<b>" + nb(l.qte) + "</b>" }].concat(d.numBc ? [{ h: "Qté BC", n: 1, f: l => "<b>" + nb(l.qteBc) + "</b>" }] : [], [{ h: "Unité", f: l => esc(l.unite) }, { h: "Code_Engin", f: l => mono(l.engin) }]), L, { empty: "Aucune ligne." }) +
+    (d.numBc ? '<div class="banner ok">Bon de commande <b>' + esc(d.numBc) + "</b>" + (d.fourn ? " · fournisseur <b>" + esc(d.fourn) + "</b>" : "") + " · activé par " + esc(nameOf(d.bcBy)) + " le " + fDT(d.bcAt) + (d.numBl ? " · <b>BL " + esc(d.numBl) + "</b> réceptionné le " + fDT(d.blAt) : "") + "</div>" : "") +
+    table([{ h: "N° Poste", f: l => esc(l.poste) }, { h: "Désignation Catalogue", f: l => esc(l.designation) }, { h: "Référence", f: l => mono(l.ref) }, { h: d.numBc ? "Qté DA" : "Quantité", n: 1, f: l => "<b>" + nb(l.qte) + "</b>" }].concat(d.numBc ? [{ h: "Qté BC", n: 1, f: l => "<b>" + nb(l.qteBc) + "</b>" }] : [], d.numBl ? [{ h: "Qté BL", n: 1, f: l => "<b>" + nb(l.qteBl) + "</b>" }, { h: "Réf. équi.", f: l => esc(l.equiv) }, { h: "Marque", f: l => esc(l.marque) }] : [], [{ h: "Unité", f: l => esc(l.unite) }, { h: "Code_Engin", f: l => mono(l.engin) }]), L, { empty: "Aucune ligne." }) +
     '<div class="actions" style="justify-content:flex-start">' + (canViewDevis(d) ? '<button type="button" class="btn" data-act="da-devis" data-id="' + d.id + '">📄 Voir le devis</button>' : "") + '<button type="button" class="btn" data-act="da-pdf" data-id="' + d.id + '">Télécharger PDF</button><button type="button" class="btn" data-act="da-xls" data-id="' + d.id + '">Télécharger Excel</button>' +
     (S.canNumDA && d.statut === "en_attente" ? '<button type="button" class="btn primary" data-act="da-num" data-id="' + d.id + '">Saisir N° DA</button>' : "") + "</div>";
   const ov = modal(daLabel(d), html, async () => {}, "Fermer", true); ov.querySelector("#mf-cancel").hidden = true;
@@ -859,6 +891,7 @@ function onDaChange(p) {
   if (p.eventType === "DELETE") { S.da.delete(old.id); daLines(old.id).forEach(l => S.daL.delete(l.id)); schedule(); return; }
   const was = S.da.get(row.id); S.da.set(row.id, mapDA(row));
   if (p.eventType === "INSERT" && row.created_by !== S.uid && S.canNumDA && row.statut === "en_attente") daNotify("🔔 Nouvelle demande d'achat", "#" + row.id + " de " + nameOf(row.created_by) + (row.engin ? " · engin " + row.engin : "") + " : à numéroter dans « Création DA ».");
+  if (p.eventType === "UPDATE" && row.num_bl && was && !was.numBl && row.bl_by !== S.uid && (row.created_by === S.uid || S.isAdmin)) daNotify("📦 Livraison reçue", "BC " + row.num_bc + " : BL " + row.num_bl + " réceptionné, articles entrés en magasin.");
   if (p.eventType === "UPDATE" && row.num_bc && was && !was.numBc && row.bc_by !== S.uid && (row.created_by === S.uid || S.isAdmin)) daNotify("✔ BC activé", "DA " + row.numero_da + " : BC " + row.num_bc + ". Il est dans « Suivi BC ».");
   if (p.eventType === "UPDATE" && row.numero_da && (!was || !was.numero) && row.numero_by !== S.uid && (row.created_by === S.uid || S.isAdmin)) daNotify("✔ DA numérotée", "Demande #" + row.id + " : N° DA " + row.numero_da + " saisi par " + nameOf(row.numero_by) + ". Elle est dans « Suivi DA ».");
   schedule();
@@ -1155,9 +1188,10 @@ document.addEventListener("click", async e => { const b = e.target.closest("[dat
     if (a === "da-tpl") { const l = document.createElement("a"); l.href = "modeles/Canevas_DA.xlsx"; l.download = "Canevas_DA.xlsx"; document.body.appendChild(l); l.click(); l.remove(); return; }
     if (a === "da-notif") { await Notification.requestPermission(); render(true); return; }
     if (a === "bc-xls-all") { const r = VIEWS.suivibc.rows(); if (!r.length) { toast("Aucun BC à exporter."); return; } return await daExcel(r, "Suivi_BC_" + today() + ".xlsx"); }
-    if ((a.startsWith("da-") || a.startsWith("bc-")) && a !== "da-xls-all") { const d = S.da.get(+id); if (!d) return;
+    if ((a.startsWith("da-") || a.startsWith("bc-") || a === "bl-start") && a !== "da-xls-all") { const d = S.da.get(+id); if (!d) return;
       if (a === "da-view") return daView(d);
       if (a === "bc-start") return bcStart(d);
+      if (a === "bl-start") return blStart(d);
       if (a === "bc-edit") return S.canNumDA && bcQtyForm(d, d.numBc);
       if (a === "da-devis") return canViewDevis(d) && await openDevis(d);
       if (a === "da-edit") return canEditDA(d) && daForm(d);
