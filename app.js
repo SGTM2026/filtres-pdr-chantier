@@ -111,15 +111,17 @@ function who(id) { if (!id) return '<span class="muted">Import initial</span>'; 
 
 /* ---------- navigation ---------- */
 const NAV = [
-  ["Pilotage", [["dash", "Tableau de bord"], ["hdash", "Gestion huiles", true], ["journal", "Journal d'activité"]]],
+  ["Pilotage", [["dash", "Tableau de bord", true], ["hdash", "Gestion huiles", true], ["journal", "Journal d'activité", true]]],
   ["Magasin", [["stock", "Stock actuel"], ["entrees", "Entrées (BC / BL)"], ["sorties", "Sorties"]]],
   ["Huiles", [["huiles", "Suivi huiles"]]],
   ["Achats", [["da", "Création DA", "da"], ["suivida", "Suivi DA", "da"]]],
   ["Recherche", [["engin", "Suivi par engin"], ["ref", "Recherche référence"]]],
-  ["Référentiel", [["engins", "Engins"], ["depart", "Stock de départ"], ["params", "Paramètres"]]],
+  ["Référentiel", [["engins", "Engins", true], ["depart", "Stock de départ", true], ["params", "Paramètres", true]]],
   ["Administration", [["users", "Utilisateurs", true], ["compte", "Mon compte"]]]
 ];
 let navHtml = "";
+const ADMIN_VIEWS = new Set(NAV.flatMap(([, items]) => items.filter(i => i[2] === true).map(i => i[0])));
+const canSee = v => !!VIEWS[v] && (!ADMIN_VIEWS.has(v) || S.isAdmin) && (!["da", "suivida"].includes(v) || S.canDA);
 function renderNav() {
   const att = C ? C.ent.filter(e => e.reste > 0).length : 0, news = newsList().length, daN = S.canDA ? daPending().length : 0;
   const html = NAV.map(([g, items]) => { const it = items.filter(i => !i[2] || (i[2] === "da" ? S.canDA : S.isAdmin)); if (!it.length) return "";
@@ -130,7 +132,7 @@ function renderNav() {
 $("#nav").addEventListener("click", e => { const b = e.target.closest("[data-view]"); if (!b) return; go(b.dataset.view); });
 $("#burger").addEventListener("click", () => $("#side").classList.toggle("open"));
 document.addEventListener("click", e => { const b = e.target.closest("[data-view-go]"); if (b) go(b.dataset.viewGo); });
-function go(v) { S.view = v; try { localStorage.setItem("fc-view", v); } catch (_) {} $("#side").classList.remove("open"); render(true); }
+function go(v) { if (!canSee(v)) return; S.view = v; try { localStorage.setItem("fc-view", v); } catch (_) {} $("#side").classList.remove("open"); render(true); }
 /* onglets de catégorie */
 document.addEventListener("click", e => { const b = e.target.closest("[data-cat]"); if (!b || !$("#view-tools").contains(b)) return; const c = b.dataset.cat;
   if (S.view === "stock") S.f.stockCat = c; else if (S.view === "depart") S.f.depCat = c; else S.f.cat = c || "FILTRE"; render(true); });
@@ -139,7 +141,8 @@ let lastView = null;
 function render(full) {
   if (!C) return;
   renderNav();
-  const v = VIEWS[S.view] || VIEWS.dash;
+  if (!canSee(S.view)) S.view = S.isAdmin ? "dash" : "stock";
+  const v = VIEWS[S.view];
   $("#page-title").textContent = typeof v.title === "function" ? v.title() : v.title;
   if (full || lastView !== S.view) { $("#view-tools").innerHTML = v.tools ? v.tools() : ""; lastView = S.view; v.bind && v.bind(); }
   $("#view-body").innerHTML = v.body();
@@ -1187,7 +1190,7 @@ async function startApp() {
   S.role = me.role; S.isAdmin = me.role === "admin"; S.canWrite = S.isAdmin || me.role === "saisie" || me.role === "magasinier";
   S.canDA = ["admin", "gestionnaire", "magasinier"].includes(me.role); S.canCreateDA = ["admin", "gestionnaire", "magasinier"].includes(me.role); S.canNumDA = ["admin", "magasinier"].includes(me.role); S.lastSeen = me.last_seen || null;
   $("#me-box").innerHTML = '<span class="who">' + avatar(S.uid) + '<span class="nm">' + esc(me.nom || me.identifiant) + "</span></span>" + '<span class="role ' + (S.isAdmin ? "admin" : "") + '">' + esc(ROLE_FR[me.role]) + '</span><button class="btn small" data-act="logout">Déconnexion</button>';
-  try { const v = localStorage.getItem("fc-view"); if (v && VIEWS[v] && (!["users", "hdash"].includes(v) || S.isAdmin) && (!["da", "suivida"].includes(v) || S.canDA)) S.view = v; const c = localStorage.getItem("fc-cat"); if (c === "PDR" || c === "FILTRE") S.f.cat = c; } catch (_) {}
+  try { const v = localStorage.getItem("fc-view"); if (v && canSee(v)) S.view = v; else if (!S.isAdmin) S.view = "stock"; const c = localStorage.getItem("fc-cat"); if (c === "PDR" || c === "FILTRE") S.f.cat = c; } catch (_) {}
   const [eng, dep, ent, sor, par, jr] = await Promise.all([fetchAll("engins", "code"), fetchAll("stock_depart", "id"), fetchAll("entrees", "id"), fetchAll("sorties", "id"),
     must(sb.from("params").select("*").eq("id", 1).maybeSingle()), must(sb.from("journal").select("*").order("at", { ascending: false }).limit(1000))]);
   S.engins = new Map(eng.map(r => [String(r.code), mapG(r)])); S.depart = new Map(dep.map(r => [r.id, mapD(r)])); S.entrees = new Map(ent.map(r => [r.id, mapE(r)])); S.sorties = new Map(sor.map(r => [r.id, mapS(r)]));
