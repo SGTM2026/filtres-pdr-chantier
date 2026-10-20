@@ -50,7 +50,7 @@ const S = {
   da: new Map(), daL: new Map(), hEnt: new Map(), hSor: new Map(), hCon: new Map(),
   engins: new Map(), depart: new Map(), entrees: new Map(), sorties: new Map(), profiles: new Map(), journal: [],
   params: { nom_chantier: "", types: [], huiles: [], interventions: [], ateliers: [], unites: [], seuil: 1, seuil_pdr: 1 },
-  f: { cat: "FILTRE", stockCat: "", depCat: "", stockQ: "", stockSt: "", entQ: "", entSt: "", entFrom: "", entTo: "", sorQ: "", sorFrom: "", sorTo: "", engQ: "", depQ: "", jQ: "", jUser: "", jTab: "", daQ: "", sdaQ: "", sdaFrom: "", sdaTo: "", hTab: "", hPer: "annee", hHuile: "", hQ: "", hFrom: "", hTo: "", hLastAt: "" },
+  f: { cat: "FILTRE", stockCat: "", depCat: "", stockQ: "", stockSt: "", entQ: "", entSt: "", entFrom: "", entTo: "", sorQ: "", sorFrom: "", sorTo: "", engQ: "", depQ: "", jQ: "", jUser: "", jTab: "", daQ: "", sdaQ: "", sdaFrom: "", sdaTo: "", sbcQ: "", sbcFrom: "", sbcTo: "", hTab: "", hPer: "annee", hHuile: "", hQ: "", hFrom: "", hTo: "", hLastAt: "" },
   selEngin: "", selRef: "", loaded: false
 };
 let C = null;
@@ -114,14 +114,14 @@ const NAV = [
   ["Pilotage", [["dash", "Tableau de bord", true], ["hdash", "Gestion huiles", true], ["journal", "Journal d'activité", true]]],
   ["Magasin", [["stock", "Stock actuel"], ["entrees", "Entrées (BC / BL)"], ["sorties", "Sorties"]]],
   ["Huiles", [["huiles", "Suivi huiles"]]],
-  ["Achats", [["da", "Création DA", "da"], ["suivida", "Suivi DA", "da"]]],
+  ["Achats", [["da", "Création DA", "da"], ["suivida", "Suivi DA", "da"], ["suivibc", "Suivi BC", "da"]]],
   ["Recherche", [["engin", "Suivi par engin"], ["ref", "Recherche référence"]]],
   ["Référentiel", [["engins", "Engins", true], ["depart", "Stock de départ", true], ["params", "Paramètres", true]]],
   ["Administration", [["users", "Utilisateurs", true], ["compte", "Mon compte"]]]
 ];
 let navHtml = "";
 const ADMIN_VIEWS = new Set(NAV.flatMap(([, items]) => items.filter(i => i[2] === true).map(i => i[0])));
-const canSee = v => !!VIEWS[v] && (!ADMIN_VIEWS.has(v) || S.isAdmin) && (!["da", "suivida"].includes(v) || S.canDA);
+const canSee = v => !!VIEWS[v] && (!ADMIN_VIEWS.has(v) || S.isAdmin) && (!["da", "suivida", "suivibc"].includes(v) || S.canDA);
 function renderNav() {
   const att = C ? C.ent.filter(e => e.reste > 0).length : 0, news = newsList().length, daN = S.canDA ? daPending().length : 0;
   const html = NAV.map(([g, items]) => { const it = items.filter(i => !i[2] || (i[2] === "da" ? S.canDA : S.isAdmin)); if (!it.length) return "";
@@ -594,8 +594,8 @@ function confirmBox(text, onYes) { modal("Confirmer", "<p>" + esc(text) + "</p>"
 /* =====================================================================
    DEMANDES D'ACHAT (DA) : création, numérotation par le magasinier, suivi
    ===================================================================== */
-const mapDA = r => ({ id: r.id, date: r.date_da || "", engin: r.engin || "", objet: r.objet || "", statut: r.statut, numero: r.numero_da || "", numAt: r.numero_at, numBy: r.numero_by, createdAt: r.created_at, createdBy: r.created_by, devisPath: r.devis_path || "", devisNom: r.devis_nom || "" });
-const mapDL = r => ({ id: r.id, da: r.da_id, poste: r.poste || "", designation: r.designation || "", ref: r.ref || "", qte: r.qte, unite: r.unite || "", engin: r.engin || "", obs: r.obs || "" });
+const mapDA = r => ({ id: r.id, date: r.date_da || "", engin: r.engin || "", objet: r.objet || "", statut: r.statut, numero: r.numero_da || "", numAt: r.numero_at, numBy: r.numero_by, createdAt: r.created_at, createdBy: r.created_by, devisPath: r.devis_path || "", devisNom: r.devis_nom || "", numBc: r.num_bc || "", bcAt: r.bc_at, bcBy: r.bc_by });
+const mapDL = r => ({ id: r.id, da: r.da_id, poste: r.poste || "", designation: r.designation || "", ref: r.ref || "", qte: r.qte, qteBc: r.qte_bc, unite: r.unite || "", engin: r.engin || "", obs: r.obs || "" });
 const daLines = id => [...S.daL.values()].filter(l => l.da === id).sort((a, b) => a.id - b.id);
 const daLabel = d => d.numero ? "DA " + d.numero : "Demande #" + d.id;
 const canEditDA = d => d.statut === "en_attente" && (S.isAdmin || (["gestionnaire", "magasinier"].includes(S.role) && d.createdBy === S.uid));
@@ -615,14 +615,19 @@ const daPill = d => d.statut === "numerotee" ? '<span class="pill p-ok">N° ' + 
 
 function daActs(d, where) {
   let h = '<button class="btn small" data-act="da-view" data-id="' + d.id + '">Voir</button>' + (canViewDevis(d) ? '<button class="btn small" data-act="da-devis" data-id="' + d.id + '" title="' + esc(d.devisNom) + '">📄 Devis</button>' : "");
-  if (where === "suivi") h += '<button class="btn small" data-act="da-pdf" data-id="' + d.id + '">PDF</button><button class="btn small" data-act="da-xls" data-id="' + d.id + '">Excel</button>';
+  if (where === "suivi" || where === "bc") h += '<button class="btn small" data-act="da-pdf" data-id="' + d.id + '">PDF</button><button class="btn small" data-act="da-xls" data-id="' + d.id + '">Excel</button>';
   if (S.canNumDA && d.statut === "en_attente") h += '<button class="btn small primary" data-act="da-num" data-id="' + d.id + '">Saisir N° DA</button>';
   if (S.canNumDA && d.statut === "numerotee" && where === "suivi") h += '<button class="btn small" data-act="da-num" data-id="' + d.id + '">Corriger N°</button>';
+  if (S.canNumDA && where === "bc") h += '<button class="btn small" data-act="bc-edit" data-id="' + d.id + '">Modifier BC</button>';
   if (canEditDA(d)) h += '<button class="btn small" data-act="da-edit" data-id="' + d.id + '">Modifier</button><button class="btn small danger" data-act="da-del" data-id="' + d.id + '">Suppr.</button>';
   return '<div class="rowact">' + h + "</div>";
 }
 function daCols(where) {
   if (where === "suivi") return [{ h: "Date DA", f: d => fD(d.date) }, { h: "N° DA", f: d => "<b>" + mono(d.numero) + "</b>" },
+    { h: "Code engin", f: d => { const c = [...new Set(daLines(d.id).map(l => l.engin).filter(Boolean))]; return c.length ? c.map(mono).join(" ") : (d.engin ? mono(d.engin) : '<span class="muted">–</span>'); } },
+    { h: "Lignes", n: 1, f: d => nb(daLines(d.id).length) },
+    { h: "Activer BC", f: d => S.canNumDA ? '<button class="btn small primary bc-go" data-act="bc-start" data-id="' + d.id + '" title="Saisir le N° de BC">➜ BC</button>' : '<span class="muted">–</span>' }, { h: "", f: d => daActs(d, where) }];
+  if (where === "bc") return [{ h: "Date DA", f: d => fD(d.date) }, { h: "N° DA", f: d => "<b>" + mono(d.numero) + "</b>" }, { h: "N° BC", f: d => '<b class="mono">' + esc(d.numBc) + "</b>" },
     { h: "Code engin", f: d => { const c = [...new Set(daLines(d.id).map(l => l.engin).filter(Boolean))]; return c.length ? c.map(mono).join(" ") : (d.engin ? mono(d.engin) : '<span class="muted">–</span>'); } },
     { h: "Lignes", n: 1, f: d => nb(daLines(d.id).length) }, { h: "", f: d => daActs(d, where) }];
   return [{ h: "Réf. interne", f: d => mono("#" + d.id) }, { h: "Date DA", f: d => fD(d.date) },
@@ -651,10 +656,39 @@ VIEWS.suivida = { title: "Suivi DA",
   tools: () => '<div class="tools">' + searchF("sda-q", S.f.sdaQ, "N° DA, engin, référence…") + field("sda-f", "Du", '<input id="sda-f" type="date" value="' + esc(S.f.sdaFrom) + '">') + field("sda-t", "Au", '<input id="sda-t" type="date" value="' + esc(S.f.sdaTo) + '">') +
     '<span class="grow"></span><button class="btn" data-act="da-xls-all">Exporter la liste (Excel)</button></div>',
   bind() { ["sda-q", "sda-f", "sda-t"].forEach(id => $("#" + id).addEventListener(id === "sda-q" ? "input" : "change", () => { S.f.sdaQ = $("#sda-q").value; S.f.sdaFrom = $("#sda-f").value; S.f.sdaTo = $("#sda-t").value; render(); })); },
-  rows() { const q = norm(S.f.sdaQ); return [...S.da.values()].filter(d => d.statut === "numerotee" && inPeriod(d.date, S.f.sdaFrom, S.f.sdaTo) && daMatch(d, q)).sort((a, b) => (b.numAt || "").localeCompare(a.numAt || "") || b.id - a.id); },
+  rows() { const q = norm(S.f.sdaQ); return [...S.da.values()].filter(d => d.statut === "numerotee" && !d.numBc && inPeriod(d.date, S.f.sdaFrom, S.f.sdaTo) && daMatch(d, q)).sort((a, b) => (b.numAt || "").localeCompare(a.numAt || "") || b.id - a.id); },
   body() { if (!S.canDA) return '<div class="empty">Réservé aux administrateurs, gestionnaires et magasiniers.</div>';
     const r = this.rows(); const lines = r.reduce((t, d) => t + daLines(d.id).length, 0);
-    return '<div class="more">' + r.length + " demande(s) numérotée(s) · " + lines + " ligne(s). Téléchargez chaque DA en PDF ou en Excel (format du canevas).</div>" + table(daCols("suivi"), r, { empty: "Aucune demande numérotée." }); } };
+    return '<div class="more">' + r.length + " demande(s) numérotée(s) en attente de BC · " + lines + " ligne(s). Cliquez « ➜ BC » pour activer le bon de commande : la DA passe dans « Suivi BC ».</div>" + table(daCols("suivi"), r, { empty: "Aucune demande numérotée." }); } };
+
+VIEWS.suivibc = { title: "Suivi BC",
+  tools: () => '<div class="tools">' + searchF("sbc-q", S.f.sbcQ, "N° BC, N° DA, engin, référence…") + field("sbc-f", "Du", '<input id="sbc-f" type="date" value="' + esc(S.f.sbcFrom) + '">') + field("sbc-t", "Au", '<input id="sbc-t" type="date" value="' + esc(S.f.sbcTo) + '">') +
+    '<span class="grow"></span><button class="btn" data-act="bc-xls-all">Exporter la liste (Excel)</button></div>',
+  bind() { ["sbc-q", "sbc-f", "sbc-t"].forEach(id => $("#" + id).addEventListener(id === "sbc-q" ? "input" : "change", () => { S.f.sbcQ = $("#sbc-q").value; S.f.sbcFrom = $("#sbc-f").value; S.f.sbcTo = $("#sbc-t").value; render(); })); },
+  rows() { const q = norm(S.f.sbcQ); return [...S.da.values()].filter(d => d.numBc && inPeriod(d.date, S.f.sbcFrom, S.f.sbcTo) && (daMatch(d, q) || norm(d.numBc).includes(q))).sort((a, b) => (b.bcAt || "").localeCompare(a.bcAt || "") || b.id - a.id); },
+  body() { if (!S.canDA) return '<div class="empty">Réservé aux administrateurs, gestionnaires et magasiniers.</div>';
+    const r = this.rows(); return '<div class="more">' + r.length + " bon(s) de commande · " + r.reduce((t, d) => t + daLines(d.id).length, 0) + " ligne(s). Téléchargez chaque BC en PDF ou en Excel.</div>" + table(daCols("bc"), r, { empty: "Aucun BC activé." }); } };
+
+/* ---------- activation du bon de commande (magasinier / administrateur) ---------- */
+function bcStart(d) {
+  if (!S.canNumDA) return;
+  modal("Saisir le N° de BC – DA " + d.numero, F("bc-num", "N° de BC *", '<input id="bc-num" value="' + esc(d.numBc) + '" placeholder="ex. 4400012345" autocomplete="off">'),
+    async ov => { const num = fv(ov, "bc-num"); if (!num) return "Saisissez le N° de BC."; setTimeout(() => bcQtyForm(d, num), 0); }, "Valider le N° BC");
+}
+function bcQtyForm(d, num) {
+  const L = daLines(d.id), codes = [...new Set(L.map(l => l.engin).filter(Boolean))];
+  const head = '<div class="bc-head">' + (codes.length ? codes.map(c => '<div class="chip"><b class="mono">' + esc(c) + "</b> " + esc(enginTxt(c)) + "</div>").join("") : '<span class="muted">Code engin non précisé</span>') + "</div>";
+  const html = head + '<div class="fgrid">' + F("bq-num", "N° BC *", '<input id="bq-num" value="' + esc(num) + '">') + F("bq-da", "N° DA", '<input id="bq-da" value="' + esc(d.numero) + '" readonly>') + "</div>" +
+    '<div class="tw le"><table><thead><tr><th>N° Poste</th><th>Désignation Catalogue</th><th>Référence</th><th>Unité</th><th class="n">Qté DA</th><th class="n" style="width:110px">Qté BC *</th></tr></thead><tbody>' +
+    L.map(l => '<tr data-l="' + l.id + '"><td>' + esc(l.poste) + "</td><td>" + esc(l.designation) + "</td><td>" + mono(l.ref) + "</td><td>" + esc(l.unite) + '</td><td class="n"><b>' + nb(l.qte) + '</b></td><td><input class="bq-q" type="number" min="0" step="any" value="' + esc(l.qteBc ?? l.qte) + '"></td></tr>').join("") +
+    '</tbody></table></div><p class="hint">Qté BC proposée = qté DA ; modifiez-la si le bon de commande diffère.</p>';
+  const ov = modal("BC " + num, html, async ov => { const n2 = fv(ov, "bq-num"); if (!n2) return "Saisissez le N° de BC.";
+    const vals = [...ov.querySelectorAll("tr[data-l]")].map(tr => ({ id: +tr.dataset.l, q: tr.querySelector(".bq-q").value.trim() }));
+    if (vals.some(v => v.q === "" || !(+v.q.replace(",", ".") >= 0))) return "Saisissez une quantité BC valide sur chaque ligne (0 si l'article n'est pas commandé).";
+    for (const v of vals) { const r = await must(sb.from("da_lignes").update({ qte_bc: +v.q.replace(",", ".") }).eq("id", v.id).select()); if (!r.length) throw new Error("permission denied"); S.daL.set(r[0].id, mapDL(r[0])); }
+    const r = await must(sb.from("da").update({ num_bc: n2 }).eq("id", d.id).select().single()); S.da.set(r.id, mapDA(r)); schedule(); toast("BC " + n2 + " activé pour la DA " + d.numero + " : il est dans « Suivi BC »."); }, "Valider", true);
+  const b = ov.querySelector(".bq-q"); if (b) { b.focus(); b.select(); }
+}
 
 /* ---------- formulaire DA ---------- */
 const lineRow = (l, i) => '<tr data-i="' + i + '"><td><input class="dl-poste" value="' + esc(l.poste) + '"></td><td><input class="dl-des" list="dl-types" value="' + esc(l.designation) + '"></td><td><input class="dl-ref" list="dl-refs" value="' + esc(l.ref) + '"></td>' +
@@ -707,7 +741,8 @@ function daView(d) {
   const L = daLines(d.id);
   const html = '<div class="kpis">' + kpi("Statut", d.statut === "numerotee" ? "N° " + esc(d.numero) : "En attente", d.statut === "numerotee" ? "txt" : "warn") + kpi("Date DA", fD(d.date), "txt") + kpi("Lignes", nb(L.length)) + kpi("Qté totale", nb(L.reduce((t, l) => t + N(l.qte), 0))) + "</div>" +
     '<p class="muted">' + (d.engin ? "Engin principal : <b>" + esc(d.engin) + "</b> " + esc(enginTxt(d.engin)) + " · " : "") + (d.objet ? "Objet : " + esc(d.objet) + " · " : "") + "Demandeur : " + esc(nameOf(d.createdBy)) + " · créée le " + fDT(d.createdAt) + (d.numAt ? " · N° saisi par " + esc(nameOf(d.numBy)) + " le " + fDT(d.numAt) : "") + "</p>" +
-    table([{ h: "N° Poste", f: l => esc(l.poste) }, { h: "Désignation Catalogue", f: l => esc(l.designation) }, { h: "Référence", f: l => mono(l.ref) }, { h: "Quantité", n: 1, f: l => "<b>" + nb(l.qte) + "</b>" }, { h: "Unité", f: l => esc(l.unite) }, { h: "Code_Engin", f: l => mono(l.engin) }], L, { empty: "Aucune ligne." }) +
+    (d.numBc ? '<div class="banner ok">Bon de commande <b>' + esc(d.numBc) + "</b> activé par " + esc(nameOf(d.bcBy)) + " le " + fDT(d.bcAt) + "</div>" : "") +
+    table([{ h: "N° Poste", f: l => esc(l.poste) }, { h: "Désignation Catalogue", f: l => esc(l.designation) }, { h: "Référence", f: l => mono(l.ref) }, { h: d.numBc ? "Qté DA" : "Quantité", n: 1, f: l => "<b>" + nb(l.qte) + "</b>" }].concat(d.numBc ? [{ h: "Qté BC", n: 1, f: l => "<b>" + nb(l.qteBc) + "</b>" }] : [], [{ h: "Unité", f: l => esc(l.unite) }, { h: "Code_Engin", f: l => mono(l.engin) }]), L, { empty: "Aucune ligne." }) +
     '<div class="actions" style="justify-content:flex-start">' + (canViewDevis(d) ? '<button type="button" class="btn" data-act="da-devis" data-id="' + d.id + '">📄 Voir le devis</button>' : "") + '<button type="button" class="btn" data-act="da-pdf" data-id="' + d.id + '">Télécharger PDF</button><button type="button" class="btn" data-act="da-xls" data-id="' + d.id + '">Télécharger Excel</button>' +
     (S.canNumDA && d.statut === "en_attente" ? '<button type="button" class="btn primary" data-act="da-num" data-id="' + d.id + '">Saisir N° DA</button>' : "") + "</div>";
   const ov = modal(daLabel(d), html, async () => {}, "Fermer", true); ov.querySelector("#mf-cancel").hidden = true;
@@ -773,16 +808,19 @@ async function daExcel(list, name) {
   const wb = new ExcelJS.Workbook(); wb.creator = APPNAME;
   const one = list.length === 1, d0 = list[0];
   const ws = wb.addWorksheet(fileSafe(one ? (d0.engin || d0.numero || "DA") : "Suivi DA").slice(0, 31), { pageSetup: { paperSize: 9, orientation: "portrait", fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
-  ws.columns = [{ width: 11 }, { width: 13 }, { width: 11 }, { width: 32.45 }, { width: 17.73 }, { width: 8.09 }, { width: 8 }, { width: 15 }];
+  const bc = list.some(d => d.numBc);
+  ws.columns = bc ? [{ width: 11 }, { width: 13 }, { width: 13 }, { width: 11 }, { width: 32.45 }, { width: 17.73 }, { width: 8.09 }, { width: 8.09 }, { width: 8 }, { width: 15 }] : [{ width: 11 }, { width: 13 }, { width: 11 }, { width: 32.45 }, { width: 17.73 }, { width: 8.09 }, { width: 8 }, { width: 15 }];
   const thin = { style: "thin" }, bd = { top: thin, left: thin, bottom: thin, right: thin };
-  const hr = ws.addRow(["Date", "DA", "N° Poste", "Désignation Catalogue", "Référance", "Quantité", "Unité", "Code_Engin"]); hr.height = 18.9;
+  const hr = ws.addRow(bc ? ["Date", "DA", "N° BC", "N° Poste", "Désignation Catalogue", "Référance", "Qté DA", "Qté BC", "Unité", "Code_Engin"] : ["Date", "DA", "N° Poste", "Désignation Catalogue", "Référance", "Quantité", "Unité", "Code_Engin"]); hr.height = 18.9;
   hr.eachCell(c => { c.font = { name: "Arial", size: 9, bold: true }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } }; c.border = bd; c.alignment = { horizontal: "center", vertical: "middle" }; });
   for (const d of list) for (const l of daLines(d.id)) {
     const num = /^\d{1,15}$/.test(d.numero) ? +d.numero : (d.numero || ""), poste = /^\d{1,9}$/.test(l.poste) ? +l.poste : l.poste, eng = /^\d{1,9}$/.test(l.engin) ? +l.engin : l.engin;
-    const r = ws.addRow([isoToDate(d.date), num, poste, l.designation, l.ref, N(l.qte), l.unite, eng]);
-    r.eachCell({ includeEmpty: true }, (c, col) => { c.font = { name: "Arial", size: 10, bold: col === 6 || col === 8 }; c.border = bd; c.alignment = { horizontal: [4, 5].includes(col) ? "left" : "center", vertical: "middle" }; });
+    const nbc = /^\d{1,15}$/.test(d.numBc) ? +d.numBc : (d.numBc || "");
+    const r = ws.addRow(bc ? [isoToDate(d.date), num, nbc, poste, l.designation, l.ref, N(l.qte), l.qteBc ?? "", l.unite, eng] : [isoToDate(d.date), num, poste, l.designation, l.ref, N(l.qte), l.unite, eng]);
+    const left = bc ? [5, 6] : [4, 5], bold = bc ? [7, 8, 10] : [6, 8];
+    r.eachCell({ includeEmpty: true }, (c, col) => { c.font = { name: "Arial", size: 10, bold: bold.includes(col) }; c.border = bd; c.alignment = { horizontal: left.includes(col) ? "left" : "center", vertical: "middle" }; });
     r.getCell(1).numFmt = "dd/mm/yyyy"; }
-  ws.autoFilter = { from: "A1", to: { row: Math.max(1, ws.rowCount), column: 8 } };
+  ws.autoFilter = { from: "A1", to: { row: Math.max(1, ws.rowCount), column: bc ? 10 : 8 } };
   saveBlob(new Blob([await wb.xlsx.writeBuffer()], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), name);
 }
 async function daPdf(d) {
@@ -791,7 +829,7 @@ async function daPdf(d) {
   doc.setFillColor(15, 76, 92); doc.rect(0, 0, W, 24, "F"); doc.setTextColor(255); doc.setFont("helvetica", "bold"); doc.setFontSize(16); doc.text("DEMANDE D'ACHAT", 14, 11);
   doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.text(S.params.nom_chantier || "", 14, 18);
   doc.setFont("helvetica", "bold"); doc.setFontSize(13); doc.text(d.numero ? "N° DA : " + d.numero : "N° DA : en attente", W - 14, 11, { align: "right" });
-  doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.text("Réf. interne #" + d.id, W - 14, 18, { align: "right" });
+  doc.setFont("helvetica", d.numBc ? "bold" : "normal"); doc.setFontSize(d.numBc ? 11 : 9); doc.text(d.numBc ? "N° BC : " + d.numBc : "Réf. interne #" + d.id, W - 14, 18.5, { align: "right" });
   doc.setTextColor(30);
   // engin(s) : le code saisi dans Code_Engin des lignes → désignation, marque, type (modèle), série de la fiche engin
   const codes = [...new Set(L.map(l => l.engin).filter(Boolean))], eg = c => S.engins.get(String(c)) || {};
@@ -802,12 +840,15 @@ async function daPdf(d) {
     doc.autoTable({ startY: 30, body: [["Date de la DA", fD(d.date)]], theme: "plain", styles: { fontSize: 9.5, cellPadding: 1.2 }, columnStyles: { 0: { fontStyle: "bold", cellWidth: 38, textColor: [15, 76, 92] } }, margin: { left: 14, right: 14 } });
     doc.autoTable({ startY: doc.lastAutoTable.finalY + 2, head: [["Code engin", "Désignation", "Marque", "Type", "N° de série"]], body: codes.map(c => { const e = eg(c); return [c, e.designation || "-", e.marque || "-", e.modele || "-", e.serie || "-"]; }),
       theme: "grid", margin: { left: 14, right: 14 }, styles: { fontSize: 9, cellPadding: 1.6, lineColor: [160, 160, 160], lineWidth: 0.1, textColor: 20 }, headStyles: { fillColor: [222, 234, 237], textColor: [15, 76, 92], fontStyle: "bold" } }); }
-  doc.autoTable({ startY: doc.lastAutoTable.finalY + 4, head: [["N° Poste", "Désignation Catalogue", "Référence", "Quantité", "Unité", "Code_Engin"]], body: L.map(l => [l.poste, l.designation, l.ref, nb(l.qte).replace(/[\u202f\u00a0]/g, " "), l.unite, l.engin]),
+  const sp = v => nb(v).replace(/[\u202f\u00a0]/g, " ");
+  doc.autoTable({ startY: doc.lastAutoTable.finalY + 4, head: [d.numBc ? ["N° Poste", "Désignation Catalogue", "Référence", "Qté DA", "Qté BC", "Unité", "Code_Engin"] : ["N° Poste", "Désignation Catalogue", "Référence", "Quantité", "Unité", "Code_Engin"]],
+    body: L.map(l => d.numBc ? [l.poste, l.designation, l.ref, sp(l.qte), sp(l.qteBc), l.unite, l.engin] : [l.poste, l.designation, l.ref, sp(l.qte), l.unite, l.engin]),
     theme: "grid", margin: { left: 14, right: 14 },
     styles: { fontSize: 9.5, cellPadding: 2, lineColor: [120, 120, 120], lineWidth: 0.1, textColor: 20 }, headStyles: { fillColor: [255, 255, 0], textColor: 0, fontStyle: "bold", halign: "center" },
-    columnStyles: { 0: { halign: "center", cellWidth: 20 }, 2: { cellWidth: 36 }, 3: { halign: "center", cellWidth: 20, fontStyle: "bold" }, 4: { halign: "center", cellWidth: 16 }, 5: { halign: "center", cellWidth: 26, fontStyle: "bold" } } });
+    columnStyles: d.numBc ? { 0: { halign: "center", cellWidth: 18 }, 2: { cellWidth: 32 }, 3: { halign: "center", cellWidth: 17, fontStyle: "bold" }, 4: { halign: "center", cellWidth: 17, fontStyle: "bold" }, 5: { halign: "center", cellWidth: 15 }, 6: { halign: "center", cellWidth: 24, fontStyle: "bold" } }
+      : { 0: { halign: "center", cellWidth: 20 }, 2: { cellWidth: 36 }, 3: { halign: "center", cellWidth: 20, fontStyle: "bold" }, 4: { halign: "center", cellWidth: 16 }, 5: { halign: "center", cellWidth: 26, fontStyle: "bold" } } });
   const pages = doc.getNumberOfPages(); for (let p = 1; p <= pages; p++) { doc.setPage(p); doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(120); doc.text("page " + p + "/" + pages, W / 2, 290, { align: "center" }); }
-  doc.save("DA_" + fileSafe(d.numero || ("interne_" + d.id)) + (d.engin ? "_" + fileSafe(d.engin) : "") + ".pdf");
+  doc.save((d.numBc ? "BC_" + fileSafe(d.numBc) + "_DA_" : "DA_") + fileSafe(d.numero || ("interne_" + d.id)) + (d.engin ? "_" + fileSafe(d.engin) : "") + ".pdf");
 }
 
 /* ---------- notifications DA ---------- */
@@ -818,6 +859,7 @@ function onDaChange(p) {
   if (p.eventType === "DELETE") { S.da.delete(old.id); daLines(old.id).forEach(l => S.daL.delete(l.id)); schedule(); return; }
   const was = S.da.get(row.id); S.da.set(row.id, mapDA(row));
   if (p.eventType === "INSERT" && row.created_by !== S.uid && S.canNumDA && row.statut === "en_attente") daNotify("🔔 Nouvelle demande d'achat", "#" + row.id + " de " + nameOf(row.created_by) + (row.engin ? " · engin " + row.engin : "") + " : à numéroter dans « Création DA ».");
+  if (p.eventType === "UPDATE" && row.num_bc && was && !was.numBc && row.bc_by !== S.uid && (row.created_by === S.uid || S.isAdmin)) daNotify("✔ BC activé", "DA " + row.numero_da + " : BC " + row.num_bc + ". Il est dans « Suivi BC ».");
   if (p.eventType === "UPDATE" && row.numero_da && (!was || !was.numero) && row.numero_by !== S.uid && (row.created_by === S.uid || S.isAdmin)) daNotify("✔ DA numérotée", "Demande #" + row.id + " : N° DA " + row.numero_da + " saisi par " + nameOf(row.numero_by) + ". Elle est dans « Suivi DA ».");
   schedule();
 }
@@ -1112,14 +1154,17 @@ document.addEventListener("click", async e => { const b = e.target.closest("[dat
     if (a === "da-imp") return daImportDialog();
     if (a === "da-tpl") { const l = document.createElement("a"); l.href = "modeles/Canevas_DA.xlsx"; l.download = "Canevas_DA.xlsx"; document.body.appendChild(l); l.click(); l.remove(); return; }
     if (a === "da-notif") { await Notification.requestPermission(); render(true); return; }
-    if (a.startsWith("da-") && a !== "da-xls-all") { const d = S.da.get(+id); if (!d) return;
+    if (a === "bc-xls-all") { const r = VIEWS.suivibc.rows(); if (!r.length) { toast("Aucun BC à exporter."); return; } return await daExcel(r, "Suivi_BC_" + today() + ".xlsx"); }
+    if ((a.startsWith("da-") || a.startsWith("bc-")) && a !== "da-xls-all") { const d = S.da.get(+id); if (!d) return;
       if (a === "da-view") return daView(d);
+      if (a === "bc-start") return bcStart(d);
+      if (a === "bc-edit") return S.canNumDA && bcQtyForm(d, d.numBc);
       if (a === "da-devis") return canViewDevis(d) && await openDevis(d);
       if (a === "da-edit") return canEditDA(d) && daForm(d);
       if (a === "da-num") return S.canNumDA && daNumForm(d);
       if (a === "da-del") return confirmBox("Supprimer la demande d'achat #" + d.id + " (" + daLines(d.id).length + " ligne(s)) ?", async () => { const r = await must(sb.from("da").delete().eq("id", d.id).select()); if (!r.length) throw new Error("permission denied"); if (d.devisPath) sb.storage.from("devis").remove([d.devisPath]).catch(() => {}); S.da.delete(d.id); daLines(d.id).forEach(l => S.daL.delete(l.id)); schedule(); toast("Demande supprimée."); });
       if (a === "da-pdf") { toast("Préparation du PDF…"); return await daPdf(d); }
-      if (a === "da-xls") return await daExcel([d], "DA_" + fileSafe(d.numero || ("interne_" + d.id)) + (d.engin ? "_" + fileSafe(d.engin) : "") + ".xlsx"); }
+      if (a === "da-xls") return await daExcel([d], (d.numBc ? "BC_" + fileSafe(d.numBc) + "_" : "") + "DA_" + fileSafe(d.numero || ("interne_" + d.id)) + (d.engin ? "_" + fileSafe(d.engin) : "") + ".xlsx"); }
     if (a === "da-xls-all") { const r = VIEWS.suivida.rows(); if (!r.length) { toast("Aucune DA à exporter."); return; } return await daExcel(r, "Suivi_DA_" + today() + ".xlsx"); }
     if (a === "new-sortie") return sortieForm();
     if (a === "imp-entrees") return importDialog("entrees");

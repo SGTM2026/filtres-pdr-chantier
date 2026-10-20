@@ -176,3 +176,5 @@ tr.row-err td{background:var(--crit-soft)}
 .vb-t i{display:block;width:100%;background:var(--petrol);border-radius:4px 4px 0 0}
 .vb-l{color:var(--muted);margin-top:4px}
 @media (max-width:640px){.hb{grid-template-columns:1fr auto}.hb-t{grid-column:1/-1;order:3}}
+.bc-head{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.bc-go{white-space:nowrap}
