@@ -213,7 +213,7 @@ VIEWS.stock = { title: () => "Stock actuel" + (S.f.stockCat ? " – " + CATS[S.f
   rows() { const q = norm(S.f.stockQ); return C.lines.filter(l => (!S.f.stockCat || l.cat === S.f.stockCat) && (!S.f.stockSt || l.statut === S.f.stockSt) && (!q || norm(l.ref + " " + l.engin + " " + l.label + " " + l.type + " " + l.marque + " " + l.equiv).includes(q))); },
   body() { const r = this.rows(); return '<div class="more">' + r.length + " ligne(s) · " + nb(sumStock(r)) + " article(s) en stock · Stock = stock de départ + entrées livrées (BL) − sorties</div>" + table([
     { h: "Cat.", f: l => catPill(l.cat) }, { h: "Affectation", f: l => mono(l.engin || "Commun") }, { h: "Engin", f: l => esc(l.label) }, { h: "Référence", f: l => mono(l.ref) }, { h: "Désignation / type", f: l => esc(l.type) }, { h: "Marque", f: l => esc(l.marque) },
-    { h: "Entrées", n: 1, f: l => nb(l.ent) }, { h: "Sorties", n: 1, f: l => nb(l.sor) }, { h: "Stock", n: 1, f: l => "<b>" + nb(l.stock) + "</b>" },
+    { h: "Stock", n: 1, f: l => "<b>" + nb(l.stock) + "</b>" },
     { h: "Statut", f: l => pill(l.statut) }, { h: "Dern. entrée", f: l => fD(l.lastE) }, { h: "Dern. sortie", f: l => fD(l.lastS) }], r, { empty: "Aucune ligne." }); } };
 
 VIEWS.entrees = { title: () => "Entrées – " + CATS[S.f.cat].label,
@@ -622,19 +622,13 @@ function daActs(d, where) {
   return '<div class="rowact">' + h + "</div>";
 }
 function daCols(where) {
-  const cols = [];
-  if (where === "suivi") cols.push({ h: "N° DA", f: d => "<b>" + mono(d.numero) + "</b>" });
-  const suivi = where === "suivi";
-  if (!suivi) cols.push({ h: "Réf. interne", f: d => mono("#" + d.id) });
-  cols.push({ h: "Date DA", f: d => fD(d.date) });
-  if (!suivi) cols.push({ h: "Engin", f: d => d.engin ? mono(d.engin) + ' <span class="muted">' + esc(enginTxt(d.engin)) + "</span>" : '<span class="muted">Plusieurs</span>' });
-  cols.push({ h: "Lignes", n: 1, f: d => nb(daLines(d.id).length) });
-  if (!suivi) cols.push({ h: "Qté totale", n: 1, f: d => nb(daLines(d.id).reduce((t, l) => t + N(l.qte), 0)) });
-  cols.push({ h: "Demandeur", f: d => who(d.createdBy) }, { h: "Créée le", f: d => fDT(d.createdAt) });
-  if (where === "suivi") cols.push({ h: "N° saisi par", f: d => who(d.numBy) }, { h: "le", f: d => fDT(d.numAt) });
-  else cols.push({ h: "Statut", f: d => daPill(d) });
-  cols.push({ h: "", f: d => daActs(d, where) });
-  return cols;
+  if (where === "suivi") return [{ h: "Date DA", f: d => fD(d.date) }, { h: "N° DA", f: d => "<b>" + mono(d.numero) + "</b>" },
+    { h: "Code engin", f: d => { const c = [...new Set(daLines(d.id).map(l => l.engin).filter(Boolean))]; return c.length ? c.map(mono).join(" ") : (d.engin ? mono(d.engin) : '<span class="muted">–</span>'); } },
+    { h: "Lignes", n: 1, f: d => nb(daLines(d.id).length) }, { h: "", f: d => daActs(d, where) }];
+  return [{ h: "Réf. interne", f: d => mono("#" + d.id) }, { h: "Date DA", f: d => fD(d.date) },
+    { h: "Engin", f: d => d.engin ? mono(d.engin) + ' <span class="muted">' + esc(enginTxt(d.engin)) + "</span>" : '<span class="muted">Plusieurs</span>' },
+    { h: "Lignes", n: 1, f: d => nb(daLines(d.id).length) }, { h: "Qté totale", n: 1, f: d => nb(daLines(d.id).reduce((t, l) => t + N(l.qte), 0)) },
+    { h: "Demandeur", f: d => who(d.createdBy) }, { h: "Créée le", f: d => fDT(d.createdAt) }, { h: "Statut", f: d => daPill(d) }, { h: "", f: d => daActs(d, where) }];
 }
 const daMatch = (d, q) => !q || norm([d.id, d.numero, d.engin, enginTxt(d.engin), d.objet, nameOf(d.createdBy), ...daLines(d.id).map(l => l.ref + " " + l.designation + " " + l.engin)].join(" ")).includes(q);
 
