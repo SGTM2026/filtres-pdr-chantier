@@ -630,6 +630,8 @@ function daCols(where) {
   if (where === "bc") return [{ h: "Date DA", f: d => fD(d.date) }, { h: "N° DA", f: d => "<b>" + mono(d.numero) + "</b>" }, { h: "N° BC", f: d => '<b class="mono">' + esc(d.numBc) + "</b>" },
     { h: "Code engin", f: d => { const c = [...new Set(daLines(d.id).map(l => l.engin).filter(Boolean))]; return c.length ? c.map(mono).join(" ") : (d.engin ? mono(d.engin) : '<span class="muted">–</span>'); } },
     { h: "Lignes", n: 1, f: d => nb(daLines(d.id).length) },
+    { h: "Fournisseur", f: d => esc(d.fourn) || '<span class="muted">–</span>' },
+    { h: "Statut", f: d => d.numBl ? '<span class="pill p-ok">Livrée</span>' : '<span class="pill p-warn">Non livrée</span>' },
     { h: "Livrée", f: d => d.numBl ? '<span class="pill p-ok" title="Réceptionné le ' + esc(fDT(d.blAt)) + '">✔ BL ' + esc(d.numBl) + "</span>" : (S.canNumDA ? '<button class="btn small primary bc-go" data-act="bl-start" data-id="' + d.id + '" title="Saisir le N° de BL">➜ BL</button>' : '<span class="pill p-warn">En attente</span>') },
     { h: "", f: d => daActs(d, where) }];
   return [{ h: "Réf. interne", f: d => mono("#" + d.id) }, { h: "Date DA", f: d => fD(d.date) },
