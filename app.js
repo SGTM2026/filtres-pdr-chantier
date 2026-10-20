@@ -540,17 +540,27 @@ function confirmBox(text, onYes) { modal("Confirmer", "<p>" + esc(text) + "</p>"
 /* =====================================================================
    DEMANDES D'ACHAT (DA) : création, numérotation par le magasinier, suivi
    ===================================================================== */
-const mapDA = r => ({ id: r.id, date: r.date_da || "", engin: r.engin || "", objet: r.objet || "", statut: r.statut, numero: r.numero_da || "", numAt: r.numero_at, numBy: r.numero_by, createdAt: r.created_at, createdBy: r.created_by });
+const mapDA = r => ({ id: r.id, date: r.date_da || "", engin: r.engin || "", objet: r.objet || "", statut: r.statut, numero: r.numero_da || "", numAt: r.numero_at, numBy: r.numero_by, createdAt: r.created_at, createdBy: r.created_by, devisPath: r.devis_path || "", devisNom: r.devis_nom || "" });
 const mapDL = r => ({ id: r.id, da: r.da_id, poste: r.poste || "", designation: r.designation || "", ref: r.ref || "", qte: r.qte, unite: r.unite || "", engin: r.engin || "", obs: r.obs || "" });
 const daLines = id => [...S.daL.values()].filter(l => l.da === id).sort((a, b) => a.id - b.id);
 const daLabel = d => d.numero ? "DA " + d.numero : "Demande #" + d.id;
 const canEditDA = d => d.statut === "en_attente" && (S.isAdmin || (["gestionnaire", "magasinier"].includes(S.role) && d.createdBy === S.uid));
 const daPending = () => [...S.da.values()].filter(d => d.statut === "en_attente");
 const enginTxt = code => { if (!code) return ""; const e = S.engins.get(String(code)); return e ? [e.designation, e.marque, e.modele].filter(Boolean).join(" ") : ""; };
+const canViewDevis = d => !!d.devisPath && (S.isAdmin || S.role === "magasinier" || d.createdBy === S.uid);
+async function openDevis(d) { const w = window.open("", "_blank");
+  const { data, error } = await sb.storage.from("devis").createSignedUrl(d.devisPath, 600); if (error) { if (w) w.close(); throw error; }
+  if (w) w.location.href = data.signedUrl; else location.href = data.signedUrl; }
+async function uploadDevis(daId, file, oldPath) {
+  const path = daId + "/" + Date.now() + "_" + fileSafe(file.name.replace(/\.pdf$/i, "")).slice(-60) + ".pdf";
+  const { error } = await sb.storage.from("devis").upload(path, file, { contentType: "application/pdf", upsert: false }); if (error) throw error;
+  const r = await must(sb.from("da").update({ devis_path: path, devis_nom: file.name }).eq("id", daId).select().single());
+  if (oldPath) sb.storage.from("devis").remove([oldPath]).catch(() => {}); return r; }
+const devisCheck = f => !f ? "" : (!/\.pdf$/i.test(f.name) && f.type !== "application/pdf") ? "Le devis doit être un fichier PDF." : (f.size > 10 * 1024 * 1024 ? "Le devis dépasse 10 Mo." : "");
 const daPill = d => d.statut === "numerotee" ? '<span class="pill p-ok">N° ' + esc(d.numero) + "</span>" : '<span class="pill p-warn">En attente du N° DA</span>';
 
 function daActs(d, where) {
-  let h = '<button class="btn small" data-act="da-view" data-id="' + d.id + '">Voir</button>';
+  let h = '<button class="btn small" data-act="da-view" data-id="' + d.id + '">Voir</button>' + (canViewDevis(d) ? '<button class="btn small" data-act="da-devis" data-id="' + d.id + '" title="' + esc(d.devisNom) + '">📄 Devis</button>' : "");
   if (where === "suivi") h += '<button class="btn small" data-act="da-pdf" data-id="' + d.id + '">PDF</button><button class="btn small" data-act="da-xls" data-id="' + d.id + '">Excel</button>';
   if (S.canNumDA && d.statut === "en_attente") h += '<button class="btn small primary" data-act="da-num" data-id="' + d.id + '">Saisir N° DA</button>';
   if (S.canNumDA && d.statut === "numerotee" && where === "suivi") h += '<button class="btn small" data-act="da-num" data-id="' + d.id + '">Corriger N°</button>';
@@ -604,11 +614,13 @@ const lineRow = (l, i) => '<tr data-i="' + i + '"><td><input class="dl-poste" va
 function daForm(d) {
   const isNew = !d; d = d || { date: today(), engin: "", objet: "" };
   const L = isNew ? [] : daLines(d.id); while (L.length < (isNew ? 5 : Math.max(1, L.length))) L.push({ poste: "", designation: "", ref: "", qte: "", unite: "", engin: "" });
-  const html = '<div class="fgrid">' + F("d-date", "Date de la DA *", '<input id="d-date" type="date" value="' + esc(d.date) + '">') + "</div>" +
+  const html = '<div class="fgrid">' + F("d-date", "Date de la DA *", '<input id="d-date" type="date" value="' + esc(d.date) + '">') +
+    F("d-devis", "Devis (PDF, facultatif, 10 Mo max)", '<input id="d-devis" type="file" accept="application/pdf,.pdf">' + (d.devisPath ? '<div class="hint">Devis joint : <b>' + esc(d.devisNom) + '</b> · <label class="chk" style="display:inline-flex"><input type="checkbox" id="d-devis-del"> retirer</label> · un nouveau fichier le remplace</div>' : '<div class="hint">Visible par le magasinier et l\'administrateur.</div>'), "full") + "</div>" +
     '<div class="tw le"><table><thead><tr><th style="width:90px">N° Poste</th><th>Désignation Catalogue</th><th style="width:150px">Référence</th><th style="width:90px">Quantité *</th><th style="width:90px">Unité</th><th style="width:110px">Code_Engin</th><th style="width:40px"></th></tr></thead><tbody id="dl-body">' + L.map(lineRow).join("") + "</tbody></table></div>" + '<datalist id="dl-unites">' + ["U", "PCS", "JEU", "KIT", "L", "KG", "M", "PAIRE", "BOITE"].map(u => '<option value="' + u + '">').join("") + "</datalist>" +
     '<div class="actions" style="justify-content:flex-start;margin-top:8px"><button type="button" class="btn small" id="dl-add">+ Ajouter une ligne</button><span class="hint">Une ligne = un article. Les lignes vides sont ignorées.</span></div>';
   const ov = modal(isNew ? "Nouvelle demande d'achat" : "Modifier la demande #" + d.id, html, async ov => {
     const date = fv(ov, "d-date"); if (!date) return "Saisissez la date de la DA.";
+    const file = ov.querySelector("#d-devis").files[0], fErr = devisCheck(file); if (fErr) return fErr; const delDevis = !!(ov.querySelector("#d-devis-del") || {}).checked;
     const rows = [], errs = [];
     ov.querySelectorAll("#dl-body tr").forEach((tr, k) => { const g = c => tr.querySelector(c).value.trim(); const poste = g(".dl-poste"), des = g(".dl-des"), ref = g(".dl-ref"), qs = g(".dl-qte"), un = g(".dl-uni"), le = g(".dl-eng");
       if (!poste && !des && !ref && !qs && !un && !le) return; const q = +qs.replace(",", ".");
@@ -619,11 +631,16 @@ function daForm(d) {
     if (isNew) { const r = await must(sb.from("da").insert({ date_da: date, engin: eng }).select().single());
       try { const ls = await must(sb.from("da_lignes").insert(rows.map(x => Object.assign({ da_id: r.id }, x))).select()); S.da.set(r.id, mapDA(r)); ls.forEach(l => S.daL.set(l.id, mapDL(l))); }
       catch (e) { await sb.from("da").delete().eq("id", r.id); throw e; }
-      schedule(); toast("Demande d'achat #" + r.id + " créée (" + rows.length + " ligne(s)). Les personnes chargées du N° DA sont notifiées."); return; }
+      let msg = "Demande d'achat #" + r.id + " créée (" + rows.length + " ligne(s))" + (file ? " avec devis" : "") + ". Les personnes chargées du N° DA sont notifiées.";
+      if (file) { try { S.da.set(r.id, mapDA(await uploadDevis(r.id, file))); } catch (e) { msg = "Demande #" + r.id + " créée, mais le devis n'a pas pu être joint (" + errMsg(e) + "). Utilisez « Modifier » pour réessayer."; } }
+      schedule(); toast(msg); return; }
     const r = await must(sb.from("da").update({ date_da: date, engin: eng }).eq("id", d.id).select().single());
     await must(sb.from("da_lignes").delete().eq("da_id", d.id)); daLines(d.id).forEach(l => S.daL.delete(l.id));
     const ls = await must(sb.from("da_lignes").insert(rows.map(x => Object.assign({ da_id: d.id }, x))).select());
-    S.da.set(r.id, mapDA(r)); ls.forEach(l => S.daL.set(l.id, mapDL(l))); schedule(); toast("Demande #" + d.id + " modifiée."); }, isNew ? "Créer la demande" : "Enregistrer", true);
+    S.da.set(r.id, mapDA(r)); ls.forEach(l => S.daL.set(l.id, mapDL(l)));
+    if (file) S.da.set(d.id, mapDA(await uploadDevis(d.id, file, d.devisPath)));
+    else if (delDevis && d.devisPath) { const r2 = await must(sb.from("da").update({ devis_path: null, devis_nom: null }).eq("id", d.id).select().single()); sb.storage.from("devis").remove([d.devisPath]).catch(() => {}); S.da.set(d.id, mapDA(r2)); }
+    schedule(); toast("Demande #" + d.id + " modifiée."); }, isNew ? "Créer la demande" : "Enregistrer", true);
   const body = ov.querySelector("#dl-body"); let n = L.length;
   ov.querySelector("#dl-add").onclick = () => { body.insertAdjacentHTML("beforeend", lineRow({ poste: "", designation: "", ref: "", qte: "", unite: "", engin: "" }, n++)); };
   body.addEventListener("click", e => { const b = e.target.closest(".dl-del"); if (b) { if (body.children.length > 1) b.closest("tr").remove(); else b.closest("tr").querySelectorAll("input").forEach(i => i.value = ""); } });
@@ -643,7 +660,7 @@ function daView(d) {
   const html = '<div class="kpis">' + kpi("Statut", d.statut === "numerotee" ? "N° " + esc(d.numero) : "En attente", d.statut === "numerotee" ? "txt" : "warn") + kpi("Date DA", fD(d.date), "txt") + kpi("Lignes", nb(L.length)) + kpi("Qté totale", nb(L.reduce((t, l) => t + N(l.qte), 0))) + "</div>" +
     '<p class="muted">' + (d.engin ? "Engin principal : <b>" + esc(d.engin) + "</b> " + esc(enginTxt(d.engin)) + " · " : "") + (d.objet ? "Objet : " + esc(d.objet) + " · " : "") + "Demandeur : " + esc(nameOf(d.createdBy)) + " · créée le " + fDT(d.createdAt) + (d.numAt ? " · N° saisi par " + esc(nameOf(d.numBy)) + " le " + fDT(d.numAt) : "") + "</p>" +
     table([{ h: "N° Poste", f: l => esc(l.poste) }, { h: "Désignation Catalogue", f: l => esc(l.designation) }, { h: "Référence", f: l => mono(l.ref) }, { h: "Quantité", n: 1, f: l => "<b>" + nb(l.qte) + "</b>" }, { h: "Unité", f: l => esc(l.unite) }, { h: "Code_Engin", f: l => mono(l.engin) }], L, { empty: "Aucune ligne." }) +
-    '<div class="actions" style="justify-content:flex-start"><button type="button" class="btn" data-act="da-pdf" data-id="' + d.id + '">Télécharger PDF</button><button type="button" class="btn" data-act="da-xls" data-id="' + d.id + '">Télécharger Excel</button>' +
+    '<div class="actions" style="justify-content:flex-start">' + (canViewDevis(d) ? '<button type="button" class="btn" data-act="da-devis" data-id="' + d.id + '">📄 Voir le devis</button>' : "") + '<button type="button" class="btn" data-act="da-pdf" data-id="' + d.id + '">Télécharger PDF</button><button type="button" class="btn" data-act="da-xls" data-id="' + d.id + '">Télécharger Excel</button>' +
     (S.canNumDA && d.statut === "en_attente" ? '<button type="button" class="btn primary" data-act="da-num" data-id="' + d.id + '">Saisir N° DA</button>' : "") + "</div>";
   const ov = modal(daLabel(d), html, async () => {}, "Fermer", true); ov.querySelector("#mf-cancel").hidden = true;
   ov.addEventListener("click", e => { if (e.target.closest("[data-act]")) ov.remove(); });
@@ -767,9 +784,10 @@ document.addEventListener("click", async e => { const b = e.target.closest("[dat
     if (a === "da-notif") { await Notification.requestPermission(); render(true); return; }
     if (a.startsWith("da-") && a !== "da-xls-all") { const d = S.da.get(+id); if (!d) return;
       if (a === "da-view") return daView(d);
+      if (a === "da-devis") return canViewDevis(d) && await openDevis(d);
       if (a === "da-edit") return canEditDA(d) && daForm(d);
       if (a === "da-num") return S.canNumDA && daNumForm(d);
-      if (a === "da-del") return confirmBox("Supprimer la demande d'achat #" + d.id + " (" + daLines(d.id).length + " ligne(s)) ?", async () => { const r = await must(sb.from("da").delete().eq("id", d.id).select()); if (!r.length) throw new Error("permission denied"); S.da.delete(d.id); daLines(d.id).forEach(l => S.daL.delete(l.id)); schedule(); toast("Demande supprimée."); });
+      if (a === "da-del") return confirmBox("Supprimer la demande d'achat #" + d.id + " (" + daLines(d.id).length + " ligne(s)) ?", async () => { const r = await must(sb.from("da").delete().eq("id", d.id).select()); if (!r.length) throw new Error("permission denied"); if (d.devisPath) sb.storage.from("devis").remove([d.devisPath]).catch(() => {}); S.da.delete(d.id); daLines(d.id).forEach(l => S.daL.delete(l.id)); schedule(); toast("Demande supprimée."); });
       if (a === "da-pdf") { toast("Préparation du PDF…"); return await daPdf(d); }
       if (a === "da-xls") return await daExcel([d], "DA_" + fileSafe(d.numero || ("interne_" + d.id)) + (d.engin ? "_" + fileSafe(d.engin) : "") + ".xlsx"); }
     if (a === "da-xls-all") { const r = VIEWS.suivida.rows(); if (!r.length) { toast("Aucune DA à exporter."); return; } return await daExcel(r, "Suivi_DA_" + today() + ".xlsx"); }
