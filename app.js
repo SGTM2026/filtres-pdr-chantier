@@ -90,7 +90,7 @@ function compute() {
   const out = [];
   for (const l of lines.values()) { const i = info(l.ref, l.cat); l.type = i.type; l.marque = i.marque; l.equiv = i.equiv; const ck = l.cat + "|" + l.ref;
     const defSeuil = N(l.cat === "PDR" ? (S.params.seuil_pdr ?? S.params.seuil ?? 1) : (S.params.seuil ?? 1));
-    l.seuil = l.hasMin ? l.minSum : (maxMinRef.has(ck) ? maxMinRef.get(ck) : defSeuil);
+    l.seuil = l.cat === "PDR" ? 0 : (l.hasMin ? l.minSum : (maxMinRef.has(ck) ? maxMinRef.get(ck) : defSeuil));  // PDR : pas de seuil (RUPTURE ou OK)
     l.stock = l.dep + l.ent - l.sor; l.statut = l.stock <= 0 ? "RUPTURE" : (l.stock <= l.seuil ? "ALERTE" : "OK"); l.label = label(l.engin); out.push(l); }
   out.sort((a, b) => a.cat.localeCompare(b.cat) || (a.engin || "~").localeCompare(b.engin || "~", undefined, { numeric: true }) || a.ref.localeCompare(b.ref));
   for (const s of sor) { s.type = info(String(s.ref), s.cat).type; s.label = label(s.engin); }
@@ -181,7 +181,7 @@ VIEWS.dash = { title: "Tableau de bord", body() {
   const row = cat => { const L = C.lines.filter(l => l.cat === cat), rup = L.filter(l => l.statut === "RUPTURE").length, al = L.filter(l => l.statut === "ALERTE").length;
     const reste = att.filter(e => e.cat === cat).reduce((t, e) => t + e.reste, 0), mois = C.sor.filter(s => s.cat === cat && (s.date || "") >= m0).reduce((t, s) => t + N(s.qte), 0);
     return '<h3 class="kpi-title">' + catPill(cat) + " " + CATS[cat].label + '</h3><div class="kpis">' + kpi(CATS[cat].label + " en stock", nb(sumStock(L))) + kpi("Lignes de stock", nb(L.length)) + kpi("En rupture", nb(rup), "crit") +
-      kpi("En alerte", nb(al), "warn") + kpi("Commandés non livrés", nb(reste), "acc") + kpi("Sortis ce mois", nb(mois)) + "</div>"; };
+      (cat === "PDR" ? "" : kpi("En alerte", nb(al), "warn")) + kpi("Commandés non livrés", nb(reste), "acc") + kpi("Sortis ce mois", nb(mois)) + "</div>"; };
   const daN = S.canNumDA ? daPending().length : 0;
   let h = (daN ? '<div class="banner crit">🔔 ' + daN + " demande(s) d'achat en attente du N° DA. <button class=\"btn small\" data-view-go=\"da\">Ouvrir « Création DA »</button></div>" : "") + row("FILTRE") + row("PDR");
   h += '<div class="panel"><h3>Nouveautés ' + (S.lastSeen ? "depuis votre dernière visite <small>(" + fDT(S.lastSeen) + ")</small>" : "<small>des 7 derniers jours</small>") + '<button class="btn small" data-act="seen" style="margin-left:auto">Marquer comme lu</button></h3>' +
@@ -299,7 +299,7 @@ VIEWS.params = { title: "Paramètres", body() { const P = S.params, ro = S.isAdm
   const lst = (k, l) => '<div class="field full"><label for="pa-' + k + '">' + l + ' (une valeur par ligne)</label><textarea id="pa-' + k + '"' + ro + ">" + esc((P[k] || []).join("\n")) + "</textarea></div>";
   return '<div class="panel"><div class="fgrid">' + '<div class="field full"><label for="pa-nom">Nom du chantier</label><input id="pa-nom" value="' + esc(P.nom_chantier) + '"' + ro + "></div>" + lst("types", "Types de filtre") + lst("interventions", "Types d'intervention") + lst("ateliers", "Ateliers") + lst("unites", "Unités compteur") +
     '<div class="field"><label for="pa-seuil">Seuil d\'alerte par défaut – filtres</label><input id="pa-seuil" type="number" min="0" step="1" value="' + esc(P.seuil ?? 1) + '"' + ro + "></div>" +
-    '<div class="field"><label for="pa-seuilp">Seuil d\'alerte par défaut – PDR</label><input id="pa-seuilp" type="number" min="0" step="1" value="' + esc(P.seuil_pdr ?? 1) + '"' + ro + '></div><div class="hint full">Une ligne passe en ALERTE quand stock ≤ seuil, sauf seuil propre saisi dans le stock de départ.</div></div>' +
+    '<div class="hint full">Une ligne de filtre passe en ALERTE quand stock ≤ seuil, sauf seuil propre saisi dans le stock de départ. Les PDR n\'ont pas de seuil : RUPTURE quand stock ≤ 0, sinon OK.</div></div>' +
     (S.isAdmin ? '<div class="actions"><button class="btn primary" data-act="save-params">Enregistrer les paramètres</button></div>' : '<p class="hint">Modification réservée aux administrateurs.</p>') + "</div>"; } };
 
 const ROLE_FR = { admin: "Administrateur", gestionnaire: "Gestionnaire", magasinier: "Magasinier", saisie: "Saisie", consultation: "Consultation" };
@@ -394,7 +394,7 @@ function enginForm(code) { const e = code ? S.engins.get(code) : { refs: {} }; i
 function depForm(id) { const l = id ? S.depart.get(+id) : { date: today(), cat: S.f.depCat || "FILTRE" }; if (!l) return;
   const html = '<div class="fgrid">' + F("d-cat", "Catégorie", catSel("d-cat", l.cat)) + F("d-date", "Date d'inventaire", '<input id="d-date" type="date" value="' + esc(l.date) + '">') + F("d-eng", "Code engin (vide = stock commun)", '<input id="d-eng" list="dl-engins" value="' + esc(l.engin) + '">') +
     F("d-ref", "Référence *", '<input id="d-ref" list="dl-refs" value="' + esc(l.ref) + '">') + F("d-type", "Désignation / type", '<input id="d-type" list="dl-types" value="' + esc(l.type) + '">') + F("d-mar", "Marque", '<input id="d-mar" list="dl-marques" value="' + esc(l.marque) + '">') +
-    F("d-eq", "Réf. équivalentes", '<input id="d-eq" value="' + esc(l.equiv) + '">') + F("d-qte", "Quantité en stock", '<input id="d-qte" type="number" min="0" step="any" value="' + esc(l.qte ?? 0) + '">') + F("d-min", "Stock minimum (seuil)", '<input id="d-min" type="number" min="0" step="any" value="' + esc(l.min ?? "") + '">') +
+    F("d-eq", "Réf. équivalentes", '<input id="d-eq" value="' + esc(l.equiv) + '">') + F("d-qte", "Quantité en stock", '<input id="d-qte" type="number" min="0" step="any" value="' + esc(l.qte ?? 0) + '">') + F("d-min", "Stock minimum (seuil, filtres uniquement)", '<input id="d-min" type="number" min="0" step="any" value="' + esc(l.min ?? "") + '">') +
     F("d-emp", "Emplacement magasin", '<input id="d-emp" value="' + esc(l.empl) + '">') + F("d-obs", "Observations", '<input id="d-obs" value="' + esc(l.obs) + '">') + "</div>";
   modal(id ? "Modifier la ligne de stock de départ" : "Nouvelle ligne de stock de départ", html, async ov => { const ref = fv(ov, "d-ref"); if (!ref) return "Saisissez la référence."; const eng = fv(ov, "d-eng"); if (eng && !C.engMap.has(eng)) return "Code engin inconnu.";
     const row = { categorie: fv(ov, "d-cat"), date_inv: fv(ov, "d-date") || null, engin: eng || null, ref, type: fv(ov, "d-type") || null, marque: fv(ov, "d-mar") || null, equiv: fv(ov, "d-eq") || null, qte: fnum(ov, "d-qte") || 0, stock_min: fnum(ov, "d-min"), emplacement: fv(ov, "d-emp") || null, obs: fv(ov, "d-obs") || null };
@@ -804,7 +804,7 @@ document.addEventListener("click", async e => { const b = e.target.closest("[dat
     if (a === "new-dep") return depForm(null);
     if (a === "edit-dep") return depForm(id);
     if (a === "del-dep") { const l = S.depart.get(+id); return l && confirmBox("Supprimer la ligne de stock de départ " + l.ref + " (" + (l.engin || "commun") + ", " + nb(l.qte) + ") ?", async () => { await must(sb.from("stock_depart").delete().eq("id", l.id)); S.depart.delete(l.id); schedule(); toast("Ligne supprimée."); }); }
-    if (a === "save-params") { const P = { nom_chantier: $("#pa-nom").value.trim() }; ["types", "interventions", "ateliers", "unites"].forEach(k => P[k] = $("#pa-" + k).value.split("\n").map(s => s.trim()).filter(Boolean)); P.seuil = N($("#pa-seuil").value); P.seuil_pdr = N($("#pa-seuilp").value);
+    if (a === "save-params") { const P = { nom_chantier: $("#pa-nom").value.trim() }; ["types", "interventions", "ateliers", "unites"].forEach(k => P[k] = $("#pa-" + k).value.split("\n").map(s => s.trim()).filter(Boolean)); P.seuil = N($("#pa-seuil").value);
       const r = await must(sb.from("params").update(P).eq("id", 1).select().single()); S.params = Object.assign(S.params, r); schedule(true); applyHeader(); toast("Paramètres enregistrés."); return; }
     if (a === "seen") { await sb.rpc("set_last_seen"); S.lastSeen = new Date().toISOString(); render(); toast("Nouveautés marquées comme lues."); return; }
     if (a === "new-user") return userForm(null);
