@@ -145,8 +145,21 @@ function render(full) {
   const v = VIEWS[S.view];
   $("#page-title").textContent = typeof v.title === "function" ? v.title() : v.title;
   if (full || lastView !== S.view) { $("#view-tools").innerHTML = v.tools ? v.tools() : ""; lastView = S.view; v.bind && v.bind(); }
-  $("#view-body").innerHTML = v.body();
+  const vb = $("#view-body"), keep = [...vb.querySelectorAll(".tw")].map(t => [t.scrollTop, t.scrollLeft]), same = lastBody === S.view;
+  vb.innerHTML = v.body(); lastBody = S.view; fitTables();
+  if (same) vb.querySelectorAll(".tw").forEach((t, i) => { if (keep[i]) { t.scrollTop = keep[i][0]; t.scrollLeft = keep[i][1]; } });
 }
+/* en-tête de page et noms de colonnes fixes : seules les lignes des tableaux défilent */
+let lastBody = null;
+function fitTables() {
+  const top = $(".topbar").offsetHeight;
+  document.querySelectorAll("#view-body .tw").forEach(t => {
+    const y = t.getBoundingClientRect().top + window.scrollY, foot = t.nextElementSibling && t.nextElementSibling.classList.contains("more") ? 34 : 0;
+    t.style.maxHeight = Math.max(280, window.innerHeight - y - foot - 24) + "px"; });
+  const all = document.querySelectorAll("#view-body .tw"), last = all[all.length - 1], over = document.documentElement.scrollHeight - window.innerHeight;
+  if (last && over > 0 && last.scrollHeight > last.clientHeight) last.style.maxHeight = Math.max(280, last.clientHeight - over) + "px";
+}
+window.addEventListener("resize", () => { clearTimeout(fitTables.t); fitTables.t = setTimeout(fitTables, 120); });
 function table(cols, rows, opts = {}) {
   if (!rows.length) return '<div class="empty">' + esc(opts.empty || "Aucune ligne.") + "</div>";
   const lim = opts.limit || LIMIT; const shown = rows.slice(0, lim);
