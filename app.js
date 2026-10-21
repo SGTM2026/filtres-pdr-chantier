@@ -690,7 +690,7 @@ function daActs(d, where) {
 function daCols(where) {
   if (where === "suivi") return [{ h: "Date DA", f: d => fD(d.date) }, { h: "N° DA", f: d => "<b>" + mono(d.numero) + "</b>" },
     { h: "Code engin", f: d => { const c = [...new Set(daLines(d.id).map(l => l.engin).filter(Boolean))]; return c.length ? codesHtml(c) : (d.engin ? mono(d.engin) : codesHtml([])); } },
-    { h: "Type", f: daType }, { h: "Lignes", n: 1, f: d => nb(daLines(d.id).length) }, { h: "Activer BC", f: d => S.canNumDA && daAcommander(d) ? '<button class="btn small primary bc-go" data-act="bc-start" data-id="' + d.id + '" title="Saisir un N° de BC">➜ BC</button>' : '<span class="muted">–</span>' }, { h: "", f: d => daActs(d, where) }];
+    { h: "Type", f: daType }, { h: "Objet", f: d => esc(d.objet) || '<span class="muted">–</span>' }, { h: "Lignes", n: 1, f: d => nb(daLines(d.id).length) }, { h: "Activer BC", f: d => S.canNumDA && daAcommander(d) ? '<button class="btn small primary bc-go" data-act="bc-start" data-id="' + d.id + '" title="Saisir un N° de BC">➜ BC</button>' : '<span class="muted">–</span>' }, { h: "", f: d => daActs(d, where) }];
   return [{ h: "Réf. interne", f: d => mono("#" + d.id) }, { h: "Date DA", f: d => fD(d.date) },
     { h: "Engin", f: d => d.engin ? mono(d.engin) + ' <span class="muted">' + esc(enginTxt(d.engin)) + "</span>" : '<span class="muted">Plusieurs</span>' },
     { h: "Type", f: daType }, { h: "Objet", f: d => esc(d.objet) || '<span class="muted">–</span>' }, { h: "Lignes", n: 1, f: d => nb(daLines(d.id).length) }, { h: "Qté totale", n: 1, f: d => nb(daLines(d.id).reduce((t, l) => t + N(l.qte), 0)) },
@@ -725,7 +725,7 @@ VIEWS.suivibc = { title: "Suivi BC",
   body() { if (!S.canDA) return '<div class="empty">Réservé aux administrateurs, gestionnaires et magasiniers.</div>';
     const r = this.rows(), cnt = s => r.filter(b => bcState(b)[0] === s).length;
     return '<div class="more">' + r.length + " BC · " + cnt("Non livré") + " non livré(s) · " + cnt("Partiellement livré") + " partiellement livré(s) · " + cnt("Livré") + " livré(s) · " + cnt("Soldé") + " soldé(s)</div>" + table([
-      { h: "Date DA", f: b => fD((S.da.get(b.da) || {}).date) }, { h: "N° DA", f: b => "<b>" + mono((S.da.get(b.da) || {}).numero) + "</b>" }, { h: "N° BC", f: b => '<b class="mono">' + esc(b.num) + "</b>" },
+      { h: "Date DA", f: b => fD((S.da.get(b.da) || {}).date) }, { h: "N° DA", f: b => "<b>" + mono((S.da.get(b.da) || {}).numero) + "</b>" }, { h: "N° BC", f: b => '<b class="mono">' + esc(b.num) + "</b>" }, { h: "Objet", f: b => esc((S.da.get(b.da) || {}).objet) || '<span class="muted">–</span>' },
       { h: "Code engin", f: b => codesHtml(bcEngins(b)) }, { h: "Lignes", n: 1, f: b => nb(bclOf(b.id).length) }, { h: "Fournisseur", f: b => esc(b.fourn) || '<span class="muted">–</span>' },
       { h: "Statut", f: b => { const [t, c] = bcState(b); return '<span class="pill ' + c + '"' + (b.solde ? ' title="' + esc(b.solde) + '"' : "") + ">" + t + "</span>"; } },
       { h: "Livrée", f: b => blsOf(b.id).map(x => '<span class="pill p-ok" title="Reçu le ' + esc(fD(x.date)) + '">✔ BL ' + esc(x.num) + "</span>").join(" ") + (S.canNumDA && bcOuvert(b) ? ' <button class="btn small primary bc-go" data-act="bl-start" data-id="' + b.id + '" title="Saisir un N° de BL">➜ BL</button>' : (blsOf(b.id).length ? "" : '<span class="muted">–</span>')) },
@@ -913,7 +913,7 @@ function daForm(d) {
 }
 
 function daNumForm(d) {
-  modal((d.numero ? "Corriger le N° de DA – " : "Saisir le N° de DA – ") + "demande #" + d.id, '<p class="muted" style="margin-top:0">' + esc([fD(d.date), d.engin && ("engin " + d.engin), d.objet, daLines(d.id).length + " ligne(s)", "demandeur : " + nameOf(d.createdBy)].filter(Boolean).join(" · ")) + "</p>" +
+  modal((d.numero ? "Corriger le N° de DA – " : "Saisir le N° de DA – ") + "demande #" + d.id, '<p class="muted" style="margin-top:0">' + esc([fD(d.date), d.engin && ("engin " + d.engin), d.objet && ("objet : " + d.objet), daLines(d.id).length + " ligne(s)", "demandeur : " + nameOf(d.createdBy)].filter(Boolean).join(" · ")) + "</p>" +
     F("n-num", "N° de DA *", '<input id="n-num" value="' + esc(d.numero) + '" placeholder="ex. 4500012345" autocomplete="off">') + '<div class="hint">Après validation, la demande passe dans « Suivi DA » et le demandeur est notifié.</div>',
     async ov => { const num = fv(ov, "n-num"); if (!num) return "Saisissez le numéro de DA.";
       const dup = [...S.da.values()].find(x => x.numero === num && x.id !== d.id); if (dup) return "Ce N° de DA est déjà utilisé (demande #" + dup.id + ").";
