@@ -943,12 +943,15 @@ function daImportDialog() {
   if (!S.canCreateDA) { toast("Seuls l'administrateur, le gestionnaire et le magasinier créent des demandes d'achat."); return; }
   let groups = [];
   const html = '<p class="muted" style="margin-top:0">Choisissez votre tableau de demande d\'achat (.xlsx, .xls ou .csv) au format du canevas : <b>Date · DA · N° Poste · Désignation Catalogue · Référance · Quantité · Unité · Code_Engin</b> (la colonne Unité est facultative). Chaque feuille devient une demande ; si la colonne DA contient plusieurs numéros, une demande est créée par numéro.</p>' +
+    '<div class="fgrid">' + F("di-type", "Type de demande *", '<select id="di-type"><option value="">– choisir –</option><option value="FILTRE">Filtre</option><option value="PDR">PDR (pièces de rechange)</option></select>') +
+    F("di-objet", "Objet DA *", '<input id="di-objet" maxlength="200" placeholder="ex. Entretien 500 h, réparation freins…">') + '</div><p class="hint" style="margin-top:0">Le type et l\'objet s\'appliquent à toutes les demandes créées par cet import.</p>' +
     '<div class="tools" style="margin-bottom:8px">' + F("di-file", "Fichier", '<input id="di-file" type="file" accept=".xlsx,.xls,.xlsm,.csv">') + '<span class="grow"></span><button type="button" class="btn" data-act="da-tpl">Télécharger le canevas DA</button></div><div id="di-prev" class="imp-prev"></div>';
   const ov = modal("Importer un tableau de demande d'achat", html, async ov => {
+    const typ = fv(ov, "di-type"), obj = fv(ov, "di-objet"); if (!typ) return "Choisissez le type de demande (Filtre ou PDR)."; if (!obj) return "Saisissez l'objet de la DA.";
     const ok = groups.filter(g => g.ok.length && !g.err); if (!ok.length) return "Aucune demande importable : corrigez le fichier.";
     const btn = ov.querySelector("#mf-save"); let n = 0;
     for (const g of ok) { btn.textContent = "Import… " + n + "/" + ok.length;
-      const head = { date_da: g.date, engin: g.engin || null, source: "import" }; if (g.num && S.canNumDA) head.numero_da = g.num;
+      const head = { date_da: g.date, engin: g.engin || null, source: "import", type_da: typ, objet: obj }; if (g.num && S.canNumDA) head.numero_da = g.num;
       const r = await must(sb.from("da").insert(head).select().single());
       try { const ls = await must(sb.from("da_lignes").insert(g.ok.map(l => Object.assign({ da_id: r.id }, l))).select()); S.da.set(r.id, mapDA(r)); ls.forEach(l => S.daL.set(l.id, mapDL(l))); }
       catch (e) { await sb.from("da").delete().eq("id", r.id); throw e; } n++; }
