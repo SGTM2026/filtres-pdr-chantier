@@ -191,10 +191,18 @@ function feed(list) { if (!list.length) return '<div class="empty">Rien pour l\'
   return '<ul class="feed">' + list.map(j => { const isNew = S.lastSeen && j.at > S.lastSeen && j.user_id !== S.uid;
     return "<li>" + (isNew ? '<i class="new" title="Nouveau"></i>' : "") + avatar(j.user_id) + "<div><b>" + esc(nameOf(j.user_id)) + "</b> " + esc(jText(j)) + '</div><span class="t">' + fDT(j.at) + "</span></li>"; }).join("") + "</ul>"; }
 
+/* lignes de BC (Suivi BC) pas encore livrées : comptées dans « Commandés non livrés » (les BL déjà reçus sont dans les entrées) */
+function bcAttente() { if (!S.canDA || !S.bc) return [];
+  const out = []; for (const x of S.bcl.values()) { const b = S.bc.get(x.bc); if (!b || b.solde) continue; const liv = livreBcl(x.id), reste = x.qte - liv; if (reste <= 0) continue;
+    const l = S.daL.get(x.dal) || {}, d = S.da.get(b.da) || {}, i = (C && l.ref ? C.info(l.ref) : null) || {};
+    out.push({ fromBc: b.id, cat: d.type || i.cat || "FILTRE", date: b.date || d.date, ref: l.ref || l.designation, type: l.designation, engin: l.engin || "", dem: x.qte, liv, reste, bc: b.num, bl: blsOf(b.id).map(y => y.num).join(", ") }); }
+  return out; }
+const attActs = x => x.fromBc ? '<div class="rowact"><button class="btn small" data-act="bc-view" data-id="' + x.fromBc + '">Voir BC</button></div>' : rowActs("entree", x);
+
 /* ---------- vues ---------- */
 const VIEWS = {};
 VIEWS.dash = { title: "Tableau de bord", body() {
-  const att = C.ent.filter(e => e.reste > 0), news = newsList(), m0 = monthStart();
+  const att = C.ent.filter(e => e.reste > 0).concat(bcAttente()), news = newsList(), m0 = monthStart();
   const row = cat => { const L = C.lines.filter(l => l.cat === cat), rup = L.filter(l => l.statut === "RUPTURE").length, al = L.filter(l => l.statut === "ALERTE").length;
     const reste = att.filter(e => e.cat === cat).reduce((t, e) => t + e.reste, 0), mois = C.sor.filter(s => s.cat === cat && (s.date || "") >= m0).reduce((t, s) => t + N(s.qte), 0);
     return '<h3 class="kpi-title">' + catPill(cat) + " " + CATS[cat].label + '</h3><div class="kpis">' + kpi(CATS[cat].label + " en stock", nb(sumStock(L))) + kpi("Lignes de stock", nb(L.length)) + kpi("En rupture", nb(rup), "crit") +
@@ -254,7 +262,7 @@ VIEWS.engin = { title: "Suivi par engin",
   tools: () => '<div class="tools">' + field("eg-q", "Code engin", '<input id="eg-q" list="dl-engins" placeholder="ex. 50406" value="' + esc(S.selEngin) + '">') + "</div>",
   bind() { $("#eg-q").addEventListener("change", e => { S.selEngin = e.target.value.trim(); render(); }); },
   body() { const code = S.selEngin; if (!code) return '<div class="empty">Choisissez un code engin pour voir son stock affecté (filtres et PDR), ses commandes non livrées, ses entrées et ses sorties.</div>';
-    const e = C.engDer.get(code), L = C.lines.filter(l => l.engin === code), att = C.ent.filter(x => x.reste > 0 && String(x.engin || "") === code);
+    const e = C.engDer.get(code), L = C.lines.filter(l => l.engin === code), att = C.ent.filter(x => x.reste > 0 && String(x.engin || "") === code).concat(bcAttente().filter(x => x.engin === code));
     const so = C.sor.filter(s => s.engin === code || s.stockEng === code).slice().reverse(), en = C.ent.filter(x => String(x.engin || "") === code).slice().reverse(), own = so.filter(s => s.engin === code);
     const sumC = (arr, cat, f) => arr.filter(x => x.cat === cat).reduce((t, x) => t + f(x), 0);
     let h = '<div class="card-head"><span class="code">' + esc(code) + '</span><span class="desc">' + esc(e ? [e.designation, e.marque, e.modele].filter(Boolean).join(" ") : "⚠ Code absent de la liste des engins") + "</span>" + (e && e.serie ? '<span class="muted">N° série ' + esc(e.serie) + "</span>" : "") + "</div>";
@@ -268,7 +276,7 @@ VIEWS.engin = { title: "Suivi par engin",
     h += '<div class="panel"><h3>Stock affecté à cet engin <small>filtres et PDR</small></h3>' + table([{ h: "Cat.", f: l => catPill(l.cat) }, { h: "Référence", f: l => mono(l.ref) }, { h: "Désignation / type", f: l => esc(l.type) }, { h: "Marque", f: l => esc(l.marque) }, { h: "Entrées", n: 1, f: l => nb(l.ent) },
       { h: "Sorties", n: 1, f: l => nb(l.sor) }, { h: "Stock", n: 1, f: l => "<b>" + nb(l.stock) + "</b>" }, { h: "Statut", f: l => pill(l.statut) }, { h: "Dern. sortie", f: l => fD(l.lastS) }], L, { empty: "Aucun stock affecté : les articles de cet engin sont pris sur le stock commun." }) + "</div>";
     h += '<div class="panel"><h3>Commandés non livrés <small>toutes dates</small></h3>' + table([{ h: "Cat.", f: x => catPill(x.cat) }, { h: "Date", f: x => fD(x.date) }, { h: "Référence", f: x => mono(x.ref) }, { h: "Désignation / type", f: x => esc(x.type) }, { h: "Qté BC", n: 1, f: x => nb(x.dem) }, { h: "Qté BL", n: 1, f: x => nb(x.liv || 0) },
-      { h: "Reste", n: 1, f: x => '<span class="reste">' + nb(x.reste) + "</span>" }, { h: "N° BC", f: x => esc(x.bc) }, { h: "N° BL", f: x => esc(x.bl) }, { h: "", f: x => rowActs("entree", x) }], att, { empty: "Aucune commande en attente." }) + "</div>";
+      { h: "Reste", n: 1, f: x => '<span class="reste">' + nb(x.reste) + "</span>" }, { h: "N° BC", f: x => esc(x.bc) }, { h: "N° BL", f: x => esc(x.bl) || (x.fromBc ? '<span class="muted">en attente</span>' : "") }, { h: "", f: attActs }], att, { empty: "Aucune commande en attente." }) + "</div>";
     const mv = s => s.mvt === "sans" ? "Sans entrée en magasin" : (s.engin === code ? (s.stockEng === code ? "Propre stock" : (s.stockEng === "" ? "Stock commun" : "Emprunté au " + s.stockEng)) : "Prêté au " + s.engin);
     h += '<div class="panel"><h3>Sorties liées à cet engin <small>filtres et PDR montés sur lui ou pris sur son stock</small></h3>' + table([{ h: "Cat.", f: s => catPill(s.cat) }, { h: "Date", f: s => fD(s.date) }, { h: "Référence", f: s => mono(s.ref) }, { h: "Désignation / type", f: s => esc(s.type) }, { h: "Qté", n: 1, f: s => nb(s.qte) },
       { h: "Monté sur", f: s => esc(s.engin) }, { h: "Mouvement", f: s => esc(mv(s)) }, { h: "Intervention", f: s => esc(s.intervention) }, { h: "Compteur", n: 1, f: s => nb(s.compteur) }, { h: "Saisi par", f: s => who(s.createdBy) }], so, { limit: 80, empty: "Aucune sortie." }) + "</div>";
@@ -283,7 +291,7 @@ VIEWS.ref = { title: "Recherche référence",
   bind() { $("#rf-q").addEventListener("change", e => { S.selRef = e.target.value.trim(); render(); }); },
   body() { const ref = S.selRef; if (!ref) return '<div class="empty">Choisissez une référence de filtre ou de pièce (PDR) pour voir son stock total, sa répartition par engin et les engins qui l\'ont reçue.</div>';
     const L = C.lines.filter(l => l.ref === ref), tot = L.reduce((t, l) => t + l.stock, 0), seuil = L.reduce((t, l) => t + l.seuil, 0), st = !L.length ? "–" : (tot <= 0 ? "RUPTURE" : (tot <= seuil ? "ALERTE" : "OK")), i = C.info(ref);
-    const att = C.ent.filter(x => x.reste > 0 && String(x.ref) === ref), reste = att.reduce((t, x) => t + x.reste, 0), so = C.sor.filter(s => String(s.ref) === ref), prev = [...S.engins.values()].filter(e => Object.values(e.refs || {}).includes(ref));
+    const att = C.ent.filter(x => x.reste > 0 && String(x.ref) === ref).concat(bcAttente().filter(x => String(x.ref) === ref)), reste = att.reduce((t, x) => t + x.reste, 0), so = C.sor.filter(s => String(s.ref) === ref), prev = [...S.engins.values()].filter(e => Object.values(e.refs || {}).includes(ref));
     let h = '<div class="card-head">' + catPill(i.cat) + '<span class="code" style="font-family:var(--f-mono);font-size:26px">' + esc(ref) + '</span><span class="desc">' + esc(i.type || "Désignation non renseignée") + '</span><span class="muted">' + esc([i.marque, i.equiv && ("équiv. " + i.equiv)].filter(Boolean).join(" · ")) + "</span></div>";
     h += reste > 0 ? '<div class="banner crit">⚠ ' + nb(reste) + " article(s) de cette référence commandé(s) non livré(s) · " + att.length + " ligne(s) de BC en attente</div>" : '<div class="banner ok">✔ Aucune commande de cette référence en attente de livraison</div>';
     h += '<div class="kpis">' + kpi("Stock actuel total", nb(tot)) + '<div class="kpi"><b>' + (st === "–" ? "–" : pill(st)) + "</b><span>Statut global</span></div>" + kpi("Lignes d'affectation", nb(L.length)) + kpi("Entrés (livrés)", nb(L.reduce((t, l) => t + l.ent, 0))) +
@@ -291,7 +299,7 @@ VIEWS.ref = { title: "Recherche référence",
     h += '<div class="panel"><h3>Affectation du stock</h3>' + table([{ h: "Cat.", f: l => catPill(l.cat) }, { h: "Code engin", f: l => esc(l.engin || "Commun") }, { h: "Engin d'affectation", f: l => esc(l.label) }, { h: "Entrées", n: 1, f: l => nb(l.ent) }, { h: "Sorties", n: 1, f: l => nb(l.sor) },
       { h: "Stock", n: 1, f: l => "<b>" + nb(l.stock) + "</b>" }, { h: "Statut", f: l => pill(l.statut) }, { h: "Dern. entrée", f: l => fD(l.lastE) }, { h: "Dern. sortie", f: l => fD(l.lastS) }], L, { empty: "Cette référence n'a aucune ligne de stock." }) + "</div>";
     h += '<div class="panel"><h3>Commandes non livrées <small>toutes dates</small></h3>' + table([{ h: "Date", f: x => fD(x.date) }, { h: "Engin destinataire", f: x => esc(x.engin ? x.engin + " – " + C.label(x.engin) : "Stock commun") }, { h: "Qté BC", n: 1, f: x => nb(x.dem) }, { h: "Qté BL", n: 1, f: x => nb(x.liv || 0) },
-      { h: "Reste", n: 1, f: x => '<span class="reste">' + nb(x.reste) + "</span>" }, { h: "N° BC", f: x => esc(x.bc) }, { h: "N° BL", f: x => esc(x.bl) }, { h: "", f: x => rowActs("entree", x) }], att, { empty: "Aucune commande en attente." }) + "</div>";
+      { h: "Reste", n: 1, f: x => '<span class="reste">' + nb(x.reste) + "</span>" }, { h: "N° BC", f: x => esc(x.bc) }, { h: "N° BL", f: x => esc(x.bl) || (x.fromBc ? '<span class="muted">en attente</span>' : "") }, { h: "", f: attActs }], att, { empty: "Aucune commande en attente." }) + "</div>";
     const by = new Map(); for (const s of so) { const o = by.get(s.engin) || { engin: s.engin, cat: s.cat, qte: 0, n: 0, last: "", emp: 0 }; o.qte += N(s.qte); o.n++; if ((s.date || "") > o.last) o.last = s.date; if (s.mvt === "emprunt") o.emp += N(s.qte); by.set(s.engin, o); }
     h += '<div class="panel"><h3>Engins sur lesquels cette référence a été montée</h3>' + table([{ h: "Code", f: o => esc(o.engin) }, { h: "Engin", f: o => esc(C.label(o.engin)) }, { h: "Qté sortie", n: 1, f: o => nb(o.qte) }, { h: "Nb sorties", n: 1, f: o => nb(o.n) }, { h: "Dernière", f: o => fD(o.last) },
       { h: "dont empruntés", n: 1, f: o => nb(o.emp) }, { h: "Stock propre", n: 1, f: o => { const l = C.lineMap.get(KEY(o.cat, ref, o.engin)); return l ? nb(l.stock) : '<span class="muted">pas de ligne</span>'; } },
