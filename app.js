@@ -607,7 +607,7 @@ function confirmBox(text, onYes) { modal("Confirmer", "<p>" + esc(text) + "</p>"
 /* =====================================================================
    DEMANDES D'ACHAT (DA) : création, numérotation par le magasinier, suivi
    ===================================================================== */
-const mapDA = r => ({ id: r.id, date: r.date_da || "", engin: r.engin || "", objet: r.objet || "", statut: r.statut, numero: r.numero_da || "", numAt: r.numero_at, numBy: r.numero_by, createdAt: r.created_at, createdBy: r.created_by, devisPath: r.devis_path || "", devisNom: r.devis_nom || "", cloture: r.cloture_motif || "", clotAt: r.cloture_at, clotBy: r.cloture_by });
+const mapDA = r => ({ id: r.id, date: r.date_da || "", engin: r.engin || "", objet: r.objet || "", statut: r.statut, numero: r.numero_da || "", numAt: r.numero_at, numBy: r.numero_by, createdAt: r.created_at, createdBy: r.created_by, devisPath: r.devis_path || "", devisNom: r.devis_nom || "", type: r.type_da || "", cloture: r.cloture_motif || "", clotAt: r.cloture_at, clotBy: r.cloture_by });
 const mapDL = r => ({ id: r.id, da: r.da_id, poste: r.poste || "", designation: r.designation || "", ref: r.ref || "", qte: r.qte, qteBc: r.qte_bc, qteBl: r.qte_bl, equiv: r.equiv || "", marque: r.marque || "", unite: r.unite || "", engin: r.engin || "", obs: r.obs || "" });
 const daLines = id => [...S.daL.values()].filter(l => l.da === id).sort((a, b) => a.id - b.id);
 const daLabel = d => d.numero ? "DA " + d.numero : "Demande #" + d.id;
@@ -624,6 +624,7 @@ async function uploadDevis(daId, file, oldPath) {
   const r = await must(sb.from("da").update({ devis_path: path, devis_nom: file.name }).eq("id", daId).select().single());
   if (oldPath) sb.storage.from("devis").remove([oldPath]).catch(() => {}); return r; }
 const devisCheck = f => !f ? "" : (!/\.pdf$/i.test(f.name) && f.type !== "application/pdf") ? "Le devis doit être un fichier PDF." : (f.size > 10 * 1024 * 1024 ? "Le devis dépasse 10 Mo." : "");
+const daType = d => d.type ? '<span class="pill ' + (d.type === "PDR" ? "p-acc" : "p-info") + '">' + (d.type === "PDR" ? "PDR" : "Filtre") + "</span>" : '<span class="muted">–</span>';
 const daPill = d => d.statut === "numerotee" ? '<span class="pill p-ok">N° ' + esc(d.numero) + "</span>" : '<span class="pill p-warn">En attente du N° DA</span>';
 
 
@@ -681,10 +682,10 @@ function daActs(d, where) {
 function daCols(where) {
   if (where === "suivi") return [{ h: "Date DA", f: d => fD(d.date) }, { h: "N° DA", f: d => "<b>" + mono(d.numero) + "</b>" },
     { h: "Code engin", f: d => { const c = [...new Set(daLines(d.id).map(l => l.engin).filter(Boolean))]; return c.length ? codesHtml(c) : (d.engin ? mono(d.engin) : codesHtml([])); } },
-    { h: "Lignes", n: 1, f: d => nb(daLines(d.id).length) }, { h: "Activer BC", f: d => S.canNumDA && daAcommander(d) ? '<button class="btn small primary bc-go" data-act="bc-start" data-id="' + d.id + '" title="Saisir un N° de BC">➜ BC</button>' : '<span class="muted">–</span>' }, { h: "", f: d => daActs(d, where) }];
+    { h: "Type", f: daType }, { h: "Lignes", n: 1, f: d => nb(daLines(d.id).length) }, { h: "Activer BC", f: d => S.canNumDA && daAcommander(d) ? '<button class="btn small primary bc-go" data-act="bc-start" data-id="' + d.id + '" title="Saisir un N° de BC">➜ BC</button>' : '<span class="muted">–</span>' }, { h: "", f: d => daActs(d, where) }];
   return [{ h: "Réf. interne", f: d => mono("#" + d.id) }, { h: "Date DA", f: d => fD(d.date) },
     { h: "Engin", f: d => d.engin ? mono(d.engin) + ' <span class="muted">' + esc(enginTxt(d.engin)) + "</span>" : '<span class="muted">Plusieurs</span>' },
-    { h: "Lignes", n: 1, f: d => nb(daLines(d.id).length) }, { h: "Qté totale", n: 1, f: d => nb(daLines(d.id).reduce((t, l) => t + N(l.qte), 0)) },
+    { h: "Type", f: daType }, { h: "Lignes", n: 1, f: d => nb(daLines(d.id).length) }, { h: "Qté totale", n: 1, f: d => nb(daLines(d.id).reduce((t, l) => t + N(l.qte), 0)) },
     { h: "Demandeur", f: d => who(d.createdBy) }, { h: "Créée le", f: d => fDT(d.createdAt) }, { h: "Statut", f: d => daPill(d) }, { h: "", f: d => daActs(d, where) }];
 }
 const daMatch = (d, q) => !q || norm([d.id, d.numero, d.engin, enginTxt(d.engin), d.objet, nameOf(d.createdBy), ...daLines(d.id).map(l => l.ref + " " + l.designation + " " + l.engin), ...bcsOf(d.id).map(b => b.num + " " + b.fourn)].join(" ")).includes(q);
@@ -776,7 +777,7 @@ function blForm(b, num) {
   const html = head + '<div class="fgrid">' + F("bl-n2", "N° BL *", '<input id="bl-n2" value="' + esc(num) + '">') + F("bl-date", "Date de réception", '<input id="bl-date" type="date" value="' + today() + '">') + "</div>" +
     '<div class="tw le"><table><thead><tr><th style="width:105px">Catégorie</th><th>N° Poste</th><th>Désignation Catalogue</th><th>Référence</th><th style="width:120px">Référence équi.</th><th style="width:110px">Marque</th><th>Unité</th><th class="n">Qté BC</th><th class="n">Déjà livré</th><th class="n">Reste</th><th class="n" style="width:95px">Qté BL</th><th>Code_Engin</th></tr></thead><tbody>' +
     L.map(({ x, l, liv }) => { const i = info(l), reste = Math.max(0, x.qte - liv), off = reste <= 0;
-      return '<tr data-x="' + x.id + '" data-r="' + reste + '"' + (off ? ' class="muted"' : "") + '><td><select class="bl-cat"' + (off ? " disabled" : "") + '><option value="FILTRE"' + (i.cat !== "PDR" ? " selected" : "") + '>Filtre</option><option value="PDR"' + (i.cat === "PDR" ? " selected" : "") + '>PDR</option></select></td><td>' + esc(l.poste) + "</td><td>" + esc(l.designation) + "</td><td>" + mono(l.ref) +
+      return '<tr data-x="' + x.id + '" data-r="' + reste + '"' + (off ? ' class="muted"' : "") + '><td><select class="bl-cat"' + (off ? " disabled" : "") + '><option value="FILTRE"' + (((i.cat || d.type) || "FILTRE") !== "PDR" ? " selected" : "") + '>Filtre</option><option value="PDR"' + (((i.cat || d.type) || "FILTRE") === "PDR" ? " selected" : "") + '>PDR</option></select></td><td>' + esc(l.poste) + "</td><td>" + esc(l.designation) + "</td><td>" + mono(l.ref) +
         '</td><td><input class="bl-eq" value="' + esc(i.equiv || "") + '"' + (off ? " disabled" : "") + '></td><td><input class="bl-ma" list="dl-marques" value="' + esc(i.marque || "") + '"' + (off ? " disabled" : "") + "></td><td>" + esc(l.unite) + '</td><td class="n"><b>' + nb(x.qte) + '</b></td><td class="n">' + nb(liv) +
         '</td><td class="n">' + (reste > 0 ? '<span class="reste">' + nb(reste) + "</span>" : "0") + '</td><td><input class="bl-q" type="number" min="0" step="any" value="' + reste + '"' + (off ? " disabled" : "") + "></td><td>" + mono(l.engin) + "</td></tr>"; }).join("") +
     '</tbody></table></div><p class="hint">Saisissez la quantité réellement livrée (0 si l\'article manque). Chaque ligne livrée est ajoutée dans <b>Entrées (BC / BL)</b>. Le reste reste attendu sur ce BC : un autre BL pourra le recevoir, ou « Solder » le BC s\'il ne sera jamais livré.</p>';
@@ -840,7 +841,7 @@ async function bcPdf(b) {
   doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.text(S.params.nom_chantier || "", 14, 18);
   doc.setFont("helvetica", "bold"); doc.setFontSize(13); doc.text("N° BC : " + b.num, W - 14, 11, { align: "right" }); doc.setFontSize(10.5); doc.text("N° DA : " + (d.numero || "-"), W - 14, 18.5, { align: "right" });
   doc.setTextColor(30); const codes = bcEngins(b), eg = c => S.engins.get(String(c)) || {};
-  const info = [["Date de la DA", fD(d.date)], ["Fournisseur", b.fourn || "-"], ["Statut", st + (b.solde ? " (" + b.solde + ")" : "")]];
+  const info = [["Date de la DA", fD(d.date)], ["Type de demande", (d.type === "PDR" ? "PDR" : d.type ? "Filtre" : "-")], ["Fournisseur", b.fourn || "-"], ["Statut", st + (b.solde ? " (" + b.solde + ")" : "")]];
   if (codes.length <= 1) { const c = codes[0] || "", e = eg(c); info.push(["Code engin", c || "-"], ["Désignation", e.designation || "-"], ["Marque", e.marque || "-"], ["Type", e.modele || "-"], ["N° de série", e.serie || "-"]); }
   doc.autoTable({ startY: 30, body: info, theme: "plain", styles: { fontSize: 9.5, cellPadding: 1.2 }, columnStyles: { 0: { fontStyle: "bold", cellWidth: 38, textColor: [15, 76, 92] } }, margin: { left: 14, right: 14 } });
   if (codes.length > 1) doc.autoTable({ startY: doc.lastAutoTable.finalY + 2, head: [["Code engin", "Désignation", "Marque", "Type", "N° de série"]], body: codes.map(c => { const e = eg(c); return [c, e.designation || "-", e.marque || "-", e.modele || "-", e.serie || "-"]; }),
@@ -869,11 +870,12 @@ function daForm(d) {
   const isNew = !d; d = d || { date: today(), engin: "", objet: "" };
   const L = isNew ? [] : daLines(d.id); while (L.length < (isNew ? 5 : Math.max(1, L.length))) L.push({ poste: "", designation: "", ref: "", qte: "", unite: "", engin: "" });
   const html = '<div class="fgrid">' + F("d-date", "Date de la DA *", '<input id="d-date" type="date" value="' + esc(d.date) + '">') +
+    F("d-type", "Type de demande *", '<select id="d-type"><option value="">– choisir –</option><option value="FILTRE"' + (d.type === "FILTRE" ? " selected" : "") + '>Filtre</option><option value="PDR"' + (d.type === "PDR" ? " selected" : "") + ">PDR (pièces de rechange)</option></select>") +
     F("d-devis", "Devis (PDF, facultatif, 10 Mo max)", '<input id="d-devis" type="file" accept="application/pdf,.pdf">' + (d.devisPath ? '<div class="hint">Devis joint : <b>' + esc(d.devisNom) + '</b> · <label class="chk" style="display:inline-flex"><input type="checkbox" id="d-devis-del"> retirer</label> · un nouveau fichier le remplace</div>' : '<div class="hint">Visible par le magasinier et l\'administrateur.</div>'), "full") + "</div>" +
     '<div class="tw le"><table><thead><tr><th style="width:90px">N° Poste</th><th>Désignation Catalogue</th><th style="width:150px">Référence</th><th style="width:90px">Quantité *</th><th style="width:90px">Unité</th><th style="width:110px">Code_Engin</th><th style="width:40px"></th></tr></thead><tbody id="dl-body">' + L.map(lineRow).join("") + "</tbody></table></div>" + '<datalist id="dl-unites">' + ["U", "PCS", "JEU", "KIT", "L", "KG", "M", "PAIRE", "BOITE"].map(u => '<option value="' + u + '">').join("") + "</datalist>" +
     '<div class="actions" style="justify-content:flex-start;margin-top:8px"><button type="button" class="btn small" id="dl-add">+ Ajouter une ligne</button><span class="hint">Une ligne = un article. Les lignes vides sont ignorées.</span></div>';
   const ov = modal(isNew ? "Nouvelle demande d'achat" : "Modifier la demande #" + d.id, html, async ov => {
-    const date = fv(ov, "d-date"); if (!date) return "Saisissez la date de la DA.";
+    const date = fv(ov, "d-date"); if (!date) return "Saisissez la date de la DA."; const typ = fv(ov, "d-type"); if (!typ) return "Choisissez le type de demande (Filtre ou PDR).";
     const file = ov.querySelector("#d-devis").files[0], fErr = devisCheck(file); if (fErr) return fErr; const delDevis = !!(ov.querySelector("#d-devis-del") || {}).checked;
     const rows = [], errs = [];
     ov.querySelectorAll("#dl-body tr").forEach((tr, k) => { const g = c => tr.querySelector(c).value.trim(); const poste = g(".dl-poste"), des = g(".dl-des"), ref = g(".dl-ref"), qs = g(".dl-qte"), un = g(".dl-uni"), le = g(".dl-eng");
@@ -882,13 +884,13 @@ function daForm(d) {
       rows.push({ poste: poste || null, designation: des || null, ref: ref || null, qte: q, unite: un || null, engin: le || null }); });
     if (errs.length) return errs.slice(0, 4).join(" · "); if (!rows.length) return "Ajoutez au moins une ligne.";
     const engs = [...new Set(rows.map(x => x.engin).filter(Boolean))], eng = engs.length === 1 ? engs[0] : null;  // engin de la DA = Code_Engin des lignes
-    if (isNew) { const r = await must(sb.from("da").insert({ date_da: date, engin: eng }).select().single());
+    if (isNew) { const r = await must(sb.from("da").insert({ date_da: date, engin: eng, type_da: typ }).select().single());
       try { const ls = await must(sb.from("da_lignes").insert(rows.map(x => Object.assign({ da_id: r.id }, x))).select()); S.da.set(r.id, mapDA(r)); ls.forEach(l => S.daL.set(l.id, mapDL(l))); }
       catch (e) { await sb.from("da").delete().eq("id", r.id); throw e; }
       let msg = "Demande d'achat #" + r.id + " créée (" + rows.length + " ligne(s))" + (file ? " avec devis" : "") + ". Les personnes chargées du N° DA sont notifiées.";
       if (file) { try { S.da.set(r.id, mapDA(await uploadDevis(r.id, file))); } catch (e) { msg = "Demande #" + r.id + " créée, mais le devis n'a pas pu être joint (" + errMsg(e) + "). Utilisez « Modifier » pour réessayer."; } }
       schedule(); toast(msg); return; }
-    const r = await must(sb.from("da").update({ date_da: date, engin: eng }).eq("id", d.id).select().single());
+    const r = await must(sb.from("da").update({ date_da: date, engin: eng, type_da: typ }).eq("id", d.id).select().single());
     await must(sb.from("da_lignes").delete().eq("da_id", d.id)); daLines(d.id).forEach(l => S.daL.delete(l.id));
     const ls = await must(sb.from("da_lignes").insert(rows.map(x => Object.assign({ da_id: d.id }, x))).select());
     S.da.set(r.id, mapDA(r)); ls.forEach(l => S.daL.set(l.id, mapDL(l)));
@@ -911,7 +913,7 @@ function daNumForm(d) {
 
 function daView(d) {
   const L = daLines(d.id);
-  const html = '<div class="kpis">' + kpi("Statut", d.statut === "numerotee" ? "N° " + esc(d.numero) : "En attente", d.statut === "numerotee" ? "txt" : "warn") + kpi("Date DA", fD(d.date), "txt") + kpi("Lignes", nb(L.length)) + kpi("Qté totale", nb(L.reduce((t, l) => t + N(l.qte), 0))) + "</div>" +
+  const html = '<div class="kpis">' + kpi("Statut", d.statut === "numerotee" ? "N° " + esc(d.numero) : "En attente", d.statut === "numerotee" ? "txt" : "warn") + kpi("Date DA", fD(d.date), "txt") + kpi("Type", d.type === "PDR" ? "PDR" : d.type ? "Filtre" : "–", "txt") + kpi("Lignes", nb(L.length)) + kpi("Qté totale", nb(L.reduce((t, l) => t + N(l.qte), 0))) + "</div>" +
     '<p class="muted">' + (d.engin ? "Engin principal : <b>" + esc(d.engin) + "</b> " + esc(enginTxt(d.engin)) + " · " : "") + (d.objet ? "Objet : " + esc(d.objet) + " · " : "") + "Demandeur : " + esc(nameOf(d.createdBy)) + " · créée le " + fDT(d.createdAt) + (d.numAt ? " · N° saisi par " + esc(nameOf(d.numBy)) + " le " + fDT(d.numAt) : "") + "</p>" +
     (d.cloture ? '<div class="banner info">DA clôturée : ' + esc(d.cloture) + " (" + esc(nameOf(d.clotBy)) + ", " + fDT(d.clotAt) + ")</div>" : "") +
     (bcsOf(d.id).length ? '<div class="banner ok">Bons de commande : ' + bcsOf(d.id).map(b => "<b>" + esc(b.num) + "</b>" + (b.fourn ? " (" + esc(b.fourn) + ")" : "") + " · " + esc(bcState(b)[0])).join(" ; ") + "</div>" : "") +
@@ -1009,10 +1011,10 @@ async function daPdf(d) {
   // engin(s) : le code saisi dans Code_Engin des lignes → désignation, marque, type (modèle), série de la fiche engin
   const codes = [...new Set(L.map(l => l.engin).filter(Boolean))], eg = c => S.engins.get(String(c)) || {};
   if (codes.length <= 1) { const c = codes[0] || "", e = eg(c);
-    doc.autoTable({ startY: 30, body: [["Date de la DA", fD(d.date)], ["Code engin", c || "-"], ["Désignation", e.designation || "-"], ["Marque", e.marque || "-"], ["Type", e.modele || "-"], ["N° de série", e.serie || "-"]],
+    doc.autoTable({ startY: 30, body: [["Date de la DA", fD(d.date)], ["Type de demande", (d.type === "PDR" ? "PDR" : d.type ? "Filtre" : "-")], ["Code engin", c || "-"], ["Désignation", e.designation || "-"], ["Marque", e.marque || "-"], ["Type", e.modele || "-"], ["N° de série", e.serie || "-"]],
       theme: "plain", styles: { fontSize: 9.5, cellPadding: 1.2 }, columnStyles: { 0: { fontStyle: "bold", cellWidth: 38, textColor: [15, 76, 92] } }, margin: { left: 14, right: 14 } });
   } else {
-    doc.autoTable({ startY: 30, body: [["Date de la DA", fD(d.date)]], theme: "plain", styles: { fontSize: 9.5, cellPadding: 1.2 }, columnStyles: { 0: { fontStyle: "bold", cellWidth: 38, textColor: [15, 76, 92] } }, margin: { left: 14, right: 14 } });
+    doc.autoTable({ startY: 30, body: [["Date de la DA", fD(d.date)], ["Type de demande", (d.type === "PDR" ? "PDR" : d.type ? "Filtre" : "-")]], theme: "plain", styles: { fontSize: 9.5, cellPadding: 1.2 }, columnStyles: { 0: { fontStyle: "bold", cellWidth: 38, textColor: [15, 76, 92] } }, margin: { left: 14, right: 14 } });
     doc.autoTable({ startY: doc.lastAutoTable.finalY + 2, head: [["Code engin", "Désignation", "Marque", "Type", "N° de série"]], body: codes.map(c => { const e = eg(c); return [c, e.designation || "-", e.marque || "-", e.modele || "-", e.serie || "-"]; }),
       theme: "grid", margin: { left: 14, right: 14 }, styles: { fontSize: 9, cellPadding: 1.6, lineColor: [160, 160, 160], lineWidth: 0.1, textColor: 20 }, headStyles: { fillColor: [222, 234, 237], textColor: [15, 76, 92], fontStyle: "bold" } }); }
   const sp = v => nb(v).replace(/[\u202f\u00a0]/g, " ");
