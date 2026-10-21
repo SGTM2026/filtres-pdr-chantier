@@ -47,10 +47,10 @@ function catTabs(cur, withAll) {
 /* ---------- état ---------- */
 const S = {
   view: "dash", uid: null, me: null, role: "", isAdmin: false, canWrite: false, canDA: false, canCreateDA: false, canNumDA: false, lastSeen: null,
-  da: new Map(), daL: new Map(), hEnt: new Map(), hSor: new Map(), hCon: new Map(),
+  da: new Map(), daL: new Map(), bc: new Map(), bcl: new Map(), bl: new Map(), bll: new Map(), hEnt: new Map(), hSor: new Map(), hCon: new Map(),
   engins: new Map(), depart: new Map(), entrees: new Map(), sorties: new Map(), profiles: new Map(), journal: [],
   params: { nom_chantier: "", types: [], huiles: [], interventions: [], ateliers: [], unites: [], seuil: 1, seuil_pdr: 1 },
-  f: { cat: "FILTRE", stockCat: "", depCat: "", stockQ: "", stockSt: "", entQ: "", entSt: "", entFrom: "", entTo: "", sorQ: "", sorFrom: "", sorTo: "", engQ: "", depQ: "", jQ: "", jUser: "", jTab: "", daQ: "", sdaQ: "", sdaFrom: "", sdaTo: "", sbcQ: "", sbcFrom: "", sbcTo: "", hTab: "", hPer: "annee", hHuile: "", hQ: "", hFrom: "", hTo: "", hLastAt: "" },
+  f: { cat: "FILTRE", stockCat: "", depCat: "", stockQ: "", stockSt: "", entQ: "", entSt: "", entFrom: "", entTo: "", sorQ: "", sorFrom: "", sorTo: "", engQ: "", depQ: "", jQ: "", jUser: "", jTab: "", daQ: "", sdaQ: "", sdaFrom: "", sdaTo: "", sbcQ: "", sbcFrom: "", sbcTo: "", sbcSt: "", sdaAll: false, hTab: "", hPer: "annee", hHuile: "", hQ: "", hFrom: "", hTo: "", hLastAt: "" },
   selEngin: "", selRef: "", loaded: false
 };
 let C = null;
@@ -594,7 +594,7 @@ function confirmBox(text, onYes) { modal("Confirmer", "<p>" + esc(text) + "</p>"
 /* =====================================================================
    DEMANDES D'ACHAT (DA) : création, numérotation par le magasinier, suivi
    ===================================================================== */
-const mapDA = r => ({ id: r.id, date: r.date_da || "", engin: r.engin || "", objet: r.objet || "", statut: r.statut, numero: r.numero_da || "", numAt: r.numero_at, numBy: r.numero_by, createdAt: r.created_at, createdBy: r.created_by, devisPath: r.devis_path || "", devisNom: r.devis_nom || "", numBc: r.num_bc || "", bcAt: r.bc_at, bcBy: r.bc_by, fourn: r.fournisseur || "", numBl: r.num_bl || "", blAt: r.bl_at, blBy: r.bl_by });
+const mapDA = r => ({ id: r.id, date: r.date_da || "", engin: r.engin || "", objet: r.objet || "", statut: r.statut, numero: r.numero_da || "", numAt: r.numero_at, numBy: r.numero_by, createdAt: r.created_at, createdBy: r.created_by, devisPath: r.devis_path || "", devisNom: r.devis_nom || "", cloture: r.cloture_motif || "", clotAt: r.cloture_at, clotBy: r.cloture_by });
 const mapDL = r => ({ id: r.id, da: r.da_id, poste: r.poste || "", designation: r.designation || "", ref: r.ref || "", qte: r.qte, qteBc: r.qte_bc, qteBl: r.qte_bl, equiv: r.equiv || "", marque: r.marque || "", unite: r.unite || "", engin: r.engin || "", obs: r.obs || "" });
 const daLines = id => [...S.daL.values()].filter(l => l.da === id).sort((a, b) => a.id - b.id);
 const daLabel = d => d.numero ? "DA " + d.numero : "Demande #" + d.id;
@@ -613,33 +613,6 @@ async function uploadDevis(daId, file, oldPath) {
 const devisCheck = f => !f ? "" : (!/\.pdf$/i.test(f.name) && f.type !== "application/pdf") ? "Le devis doit être un fichier PDF." : (f.size > 10 * 1024 * 1024 ? "Le devis dépasse 10 Mo." : "");
 const daPill = d => d.statut === "numerotee" ? '<span class="pill p-ok">N° ' + esc(d.numero) + "</span>" : '<span class="pill p-warn">En attente du N° DA</span>';
 
-function daActs(d, where) {
-  let h = '<button class="btn small" data-act="da-view" data-id="' + d.id + '">Voir</button>' + (canViewDevis(d) ? '<button class="btn small" data-act="da-devis" data-id="' + d.id + '" title="' + esc(d.devisNom) + '">📄 Devis</button>' : "");
-  if (where === "suivi" || where === "bc") h += '<button class="btn small" data-act="da-pdf" data-id="' + d.id + '">PDF</button><button class="btn small" data-act="da-xls" data-id="' + d.id + '">Excel</button>';
-  if (S.canNumDA && d.statut === "en_attente") h += '<button class="btn small primary" data-act="da-num" data-id="' + d.id + '">Saisir N° DA</button>';
-  if (S.canNumDA && d.statut === "numerotee" && where === "suivi") h += '<button class="btn small" data-act="da-num" data-id="' + d.id + '">Corriger N°</button>';
-  if (S.canNumDA && where === "bc" && !d.numBl) h += '<button class="btn small" data-act="bc-edit" data-id="' + d.id + '">Modifier BC</button>';
-  if (canEditDA(d)) h += '<button class="btn small" data-act="da-edit" data-id="' + d.id + '">Modifier</button><button class="btn small danger" data-act="da-del" data-id="' + d.id + '">Suppr.</button>';
-  return '<div class="rowact">' + h + "</div>";
-}
-function daCols(where) {
-  if (where === "suivi") return [{ h: "Date DA", f: d => fD(d.date) }, { h: "N° DA", f: d => "<b>" + mono(d.numero) + "</b>" },
-    { h: "Code engin", f: d => { const c = [...new Set(daLines(d.id).map(l => l.engin).filter(Boolean))]; return c.length ? c.map(mono).join(" ") : (d.engin ? mono(d.engin) : '<span class="muted">–</span>'); } },
-    { h: "Lignes", n: 1, f: d => nb(daLines(d.id).length) },
-    { h: "Activer BC", f: d => S.canNumDA ? '<button class="btn small primary bc-go" data-act="bc-start" data-id="' + d.id + '" title="Saisir le N° de BC">➜ BC</button>' : '<span class="muted">–</span>' }, { h: "", f: d => daActs(d, where) }];
-  if (where === "bc") return [{ h: "Date DA", f: d => fD(d.date) }, { h: "N° DA", f: d => "<b>" + mono(d.numero) + "</b>" }, { h: "N° BC", f: d => '<b class="mono">' + esc(d.numBc) + "</b>" },
-    { h: "Code engin", f: d => { const c = [...new Set(daLines(d.id).map(l => l.engin).filter(Boolean))]; return c.length ? c.map(mono).join(" ") : (d.engin ? mono(d.engin) : '<span class="muted">–</span>'); } },
-    { h: "Lignes", n: 1, f: d => nb(daLines(d.id).length) },
-    { h: "Fournisseur", f: d => esc(d.fourn) || '<span class="muted">–</span>' },
-    { h: "Statut", f: d => d.numBl ? '<span class="pill p-ok">Livrée</span>' : '<span class="pill p-warn">Non livrée</span>' },
-    { h: "Livrée", f: d => d.numBl ? '<span class="pill p-ok" title="Réceptionné le ' + esc(fDT(d.blAt)) + '">✔ BL ' + esc(d.numBl) + "</span>" : (S.canNumDA ? '<button class="btn small primary bc-go" data-act="bl-start" data-id="' + d.id + '" title="Saisir le N° de BL">➜ BL</button>' : '<span class="pill p-warn">En attente</span>') },
-    { h: "", f: d => daActs(d, where) }];
-  return [{ h: "Réf. interne", f: d => mono("#" + d.id) }, { h: "Date DA", f: d => fD(d.date) },
-    { h: "Engin", f: d => d.engin ? mono(d.engin) + ' <span class="muted">' + esc(enginTxt(d.engin)) + "</span>" : '<span class="muted">Plusieurs</span>' },
-    { h: "Lignes", n: 1, f: d => nb(daLines(d.id).length) }, { h: "Qté totale", n: 1, f: d => nb(daLines(d.id).reduce((t, l) => t + N(l.qte), 0)) },
-    { h: "Demandeur", f: d => who(d.createdBy) }, { h: "Créée le", f: d => fDT(d.createdAt) }, { h: "Statut", f: d => daPill(d) }, { h: "", f: d => daActs(d, where) }];
-}
-const daMatch = (d, q) => !q || norm([d.id, d.numero, d.engin, enginTxt(d.engin), d.objet, nameOf(d.createdBy), ...daLines(d.id).map(l => l.ref + " " + l.designation + " " + l.engin)].join(" ")).includes(q);
 
 VIEWS.da = { title: "Création DA",
   tools: () => '<div class="tools">' + searchF("da-q", S.f.daQ, "N°, engin, référence, désignation…") + '<span class="grow"></span>' +
@@ -656,72 +629,226 @@ VIEWS.da = { title: "Création DA",
       h += '<div class="panel"><h3>Mes dernières demandes numérotées</h3>' + table([{ h: "N° DA", f: d => "<b>" + mono(d.numero) + "</b>" }, { h: "Date DA", f: d => fD(d.date) }, { h: "Engin", f: d => mono(d.engin) }, { h: "Numérotée le", f: d => fDT(d.numAt) }, { h: "", f: d => daActs(d, "suivi") }], mine, { empty: "Aucune pour l'instant." }) + "</div>"; }
     return h; } };
 
+/* =====================================================================
+   BC et BL multiples : une DA → plusieurs BC (lignes partielles) ; un BC → plusieurs BL (livraisons partielles)
+   ===================================================================== */
+const mapBC = r => ({ id: r.id, da: r.da_id, num: r.num_bc || "", fourn: r.fournisseur || "", date: r.date_bc || "", solde: r.solde_motif || "", soldeAt: r.solde_at, soldeBy: r.solde_by, createdAt: r.created_at, createdBy: r.created_by });
+const mapBCL = r => ({ id: r.id, bc: r.bc_id, dal: r.dal_id, qte: N(r.qte_bc) });
+const mapBL = r => ({ id: r.id, bc: r.bc_id, num: r.num_bl || "", date: r.date_bl || "", createdAt: r.created_at, createdBy: r.created_by });
+const mapBLL = r => ({ id: r.id, bl: r.bl_id, bcl: r.bcl_id, qte: N(r.qte_bl), cat: r.categorie || "", equiv: r.equiv || "", marque: r.marque || "", entree: r.entree_id });
+const byId = (a, b) => a.id - b.id;
+const bcsOf = daId => [...S.bc.values()].filter(b => b.da === daId).sort(byId);
+const bclOf = bcId => [...S.bcl.values()].filter(x => x.bc === bcId).sort(byId);
+const blsOf = bcId => [...S.bl.values()].filter(x => x.bc === bcId).sort(byId);
+const bllOf = blId => [...S.bll.values()].filter(x => x.bl === blId).sort(byId);
+const livreBcl = bclId => [...S.bll.values()].reduce((t, x) => t + (x.bcl === bclId ? x.qte : 0), 0);
+const bclEffectif = x => { const b = S.bc.get(x.bc); return b && b.solde ? Math.min(x.qte, livreBcl(x.id)) : x.qte; };  // BC soldé : seul le livré reste « commandé »
+const commandeDal = (dalId, exceptBc) => [...S.bcl.values()].reduce((t, x) => t + (x.dal === dalId && x.bc !== exceptBc ? bclEffectif(x) : 0), 0);
+const resteCmd = (l, exceptBc) => Math.max(0, N(l.qte) - commandeDal(l.id, exceptBc));
+const daAcommander = d => d.statut === "numerotee" && !d.cloture && daLines(d.id).some(l => resteCmd(l) > 0);
+function daCmdState(d) { if (d.cloture) return ["Clôturée", "p-info"]; const n = bcsOf(d.id).length, reste = daLines(d.id).some(l => resteCmd(l) > 0);
+  if (!n) return ["À commander", "p-warn"]; return reste ? ["Partiellement commandée · " + n + " BC", "p-acc"] : ["Commandée · " + n + " BC", "p-ok"]; }
+function bcState(b) { if (b.solde) return ["Soldé", "p-info"]; const L = bclOf(b.id); let reste = 0, liv = 0; for (const x of L) { const v = livreBcl(x.id); liv += v; reste += Math.max(0, x.qte - v); }
+  if (L.length && reste <= 0) return ["Livré", "p-ok"]; return liv > 0 ? ["Partiellement livré", "p-acc"] : ["Non livré", "p-warn"]; }
+const bcOuvert = b => { const s = bcState(b)[0]; return s === "Non livré" || s === "Partiellement livré"; };
+const bcEngins = b => [...new Set(bclOf(b.id).map(x => (S.daL.get(x.dal) || {}).engin).filter(Boolean))];
+const codesHtml = codes => codes.length ? codes.map(mono).join(" ") : '<span class="muted">–</span>';
+
+/* ---------- Suivi DA ---------- */
+function daActs(d, where) {
+  let h = '<button class="btn small" data-act="da-view" data-id="' + d.id + '">Voir</button>' + (canViewDevis(d) ? '<button class="btn small" data-act="da-devis" data-id="' + d.id + '" title="' + esc(d.devisNom) + '">📄 Devis</button>' : "");
+  if (where === "suivi") h += '<button class="btn small" data-act="da-pdf" data-id="' + d.id + '">PDF</button><button class="btn small" data-act="da-xls" data-id="' + d.id + '">Excel</button>';
+  if (S.canNumDA && d.statut === "en_attente") h += '<button class="btn small primary" data-act="da-num" data-id="' + d.id + '">Saisir N° DA</button>';
+  if (S.canNumDA && d.statut === "numerotee" && where === "suivi" && !bcsOf(d.id).length && !d.cloture) h += '<button class="btn small" data-act="da-num" data-id="' + d.id + '">Corriger N°</button>';
+  if (S.canNumDA && where === "suivi" && !d.cloture && daAcommander(d)) h += '<button class="btn small" data-act="da-clot" data-id="' + d.id + '" title="Les articles restants ne seront pas commandés">Clôturer</button>';
+  if (S.canNumDA && where === "suivi" && d.cloture) h += '<button class="btn small" data-act="da-reopen" data-id="' + d.id + '">Rouvrir</button>';
+  if (canEditDA(d)) h += '<button class="btn small" data-act="da-edit" data-id="' + d.id + '">Modifier</button><button class="btn small danger" data-act="da-del" data-id="' + d.id + '">Suppr.</button>';
+  return '<div class="rowact">' + h + "</div>";
+}
+function daCols(where) {
+  if (where === "suivi") return [{ h: "Date DA", f: d => fD(d.date) }, { h: "N° DA", f: d => "<b>" + mono(d.numero) + "</b>" },
+    { h: "Code engin", f: d => { const c = [...new Set(daLines(d.id).map(l => l.engin).filter(Boolean))]; return c.length ? codesHtml(c) : (d.engin ? mono(d.engin) : codesHtml([])); } },
+    { h: "Lignes", n: 1, f: d => nb(daLines(d.id).length) }, { h: "Statut", f: d => { const [t, c] = daCmdState(d); return '<span class="pill ' + c + '"' + (d.cloture ? ' title="' + esc(d.cloture) + '"' : "") + ">" + esc(t) + "</span>"; } },
+    { h: "Activer BC", f: d => S.canNumDA && daAcommander(d) ? '<button class="btn small primary bc-go" data-act="bc-start" data-id="' + d.id + '" title="Saisir un N° de BC">➜ BC</button>' : '<span class="muted">–</span>' }, { h: "", f: d => daActs(d, where) }];
+  return [{ h: "Réf. interne", f: d => mono("#" + d.id) }, { h: "Date DA", f: d => fD(d.date) },
+    { h: "Engin", f: d => d.engin ? mono(d.engin) + ' <span class="muted">' + esc(enginTxt(d.engin)) + "</span>" : '<span class="muted">Plusieurs</span>' },
+    { h: "Lignes", n: 1, f: d => nb(daLines(d.id).length) }, { h: "Qté totale", n: 1, f: d => nb(daLines(d.id).reduce((t, l) => t + N(l.qte), 0)) },
+    { h: "Demandeur", f: d => who(d.createdBy) }, { h: "Créée le", f: d => fDT(d.createdAt) }, { h: "Statut", f: d => daPill(d) }, { h: "", f: d => daActs(d, where) }];
+}
+const daMatch = (d, q) => !q || norm([d.id, d.numero, d.engin, enginTxt(d.engin), d.objet, nameOf(d.createdBy), ...daLines(d.id).map(l => l.ref + " " + l.designation + " " + l.engin), ...bcsOf(d.id).map(b => b.num + " " + b.fourn)].join(" ")).includes(q);
+
 VIEWS.suivida = { title: "Suivi DA",
   tools: () => '<div class="tools">' + searchF("sda-q", S.f.sdaQ, "N° DA, engin, référence…") + field("sda-f", "Du", '<input id="sda-f" type="date" value="' + esc(S.f.sdaFrom) + '">') + field("sda-t", "Au", '<input id="sda-t" type="date" value="' + esc(S.f.sdaTo) + '">') +
+    '<label class="chk" style="align-self:flex-end;margin-bottom:8px"><input type="checkbox" id="sda-all"' + (S.f.sdaAll ? " checked" : "") + "> Afficher aussi les DA entièrement commandées ou clôturées</label>" +
     '<span class="grow"></span><button class="btn" data-act="da-xls-all">Exporter la liste (Excel)</button></div>',
-  bind() { ["sda-q", "sda-f", "sda-t"].forEach(id => $("#" + id).addEventListener(id === "sda-q" ? "input" : "change", () => { S.f.sdaQ = $("#sda-q").value; S.f.sdaFrom = $("#sda-f").value; S.f.sdaTo = $("#sda-t").value; render(); })); },
-  rows() { const q = norm(S.f.sdaQ); return [...S.da.values()].filter(d => d.statut === "numerotee" && !d.numBc && inPeriod(d.date, S.f.sdaFrom, S.f.sdaTo) && daMatch(d, q)).sort((a, b) => (b.numAt || "").localeCompare(a.numAt || "") || b.id - a.id); },
+  bind() { ["sda-q", "sda-f", "sda-t", "sda-all"].forEach(id => $("#" + id).addEventListener(id === "sda-q" ? "input" : "change", () => { S.f.sdaQ = $("#sda-q").value; S.f.sdaFrom = $("#sda-f").value; S.f.sdaTo = $("#sda-t").value; S.f.sdaAll = $("#sda-all").checked; render(); })); },
+  rows() { const q = norm(S.f.sdaQ); return [...S.da.values()].filter(d => d.statut === "numerotee" && (S.f.sdaAll || daAcommander(d)) && inPeriod(d.date, S.f.sdaFrom, S.f.sdaTo) && daMatch(d, q)).sort((a, b) => (b.numAt || "").localeCompare(a.numAt || "") || b.id - a.id); },
   body() { if (!S.canDA) return '<div class="empty">Réservé aux administrateurs, gestionnaires et magasiniers.</div>';
-    const r = this.rows(); const lines = r.reduce((t, d) => t + daLines(d.id).length, 0);
-    return '<div class="more">' + r.length + " demande(s) numérotée(s) en attente de BC · " + lines + " ligne(s). Cliquez « ➜ BC » pour activer le bon de commande : la DA passe dans « Suivi BC ».</div>" + table(daCols("suivi"), r, { empty: "Aucune demande numérotée." }); } };
+    const r = this.rows(); return '<div class="more">' + r.length + " demande(s) · cliquez « ➜ BC » pour créer un bon de commande (une DA peut en avoir plusieurs). La DA reste ici tant qu'il reste des articles à commander ; « Clôturer » marque les articles restants comme non traités.</div>" + table(daCols("suivi"), r, { empty: "Aucune demande à commander." }); } };
 
+/* ---------- Suivi BC (une ligne par bon de commande) ---------- */
+function bcActs(b) { const d = S.da.get(b.da) || {}, hasBl = blsOf(b.id).length > 0;
+  let h = '<button class="btn small" data-act="bc-view" data-id="' + b.id + '">Voir</button>' + (d.id && canViewDevis(d) ? '<button class="btn small" data-act="da-devis" data-id="' + d.id + '">📄 Devis</button>' : "") +
+    '<button class="btn small" data-act="bc-pdf" data-id="' + b.id + '">PDF</button><button class="btn small" data-act="bc-xls" data-id="' + b.id + '">Excel</button>';
+  if (S.canNumDA && !hasBl && !b.solde) h += '<button class="btn small" data-act="bc-edit" data-id="' + b.id + '">Modifier BC</button>';
+  if (S.canNumDA && bcOuvert(b)) h += '<button class="btn small" data-act="bc-solde" data-id="' + b.id + '" title="Le reste ne sera pas livré">Solder</button>';
+  if (S.canNumDA && !hasBl) h += '<button class="btn small danger" data-act="bc-del" data-id="' + b.id + '">Suppr.</button>';
+  return '<div class="rowact">' + h + "</div>"; }
 VIEWS.suivibc = { title: "Suivi BC",
-  tools: () => '<div class="tools">' + searchF("sbc-q", S.f.sbcQ, "N° BC, N° DA, engin, référence…") + field("sbc-f", "Du", '<input id="sbc-f" type="date" value="' + esc(S.f.sbcFrom) + '">') + field("sbc-t", "Au", '<input id="sbc-t" type="date" value="' + esc(S.f.sbcTo) + '">') +
+  tools: () => '<div class="tools">' + searchF("sbc-q", S.f.sbcQ, "N° BC, N° DA, fournisseur, référence…") + field("sbc-s", "Statut", '<select id="sbc-s"><option value="">Tous</option><option>Non livré</option><option>Partiellement livré</option><option>Livré</option><option>Soldé</option></select>') +
+    field("sbc-f", "Du", '<input id="sbc-f" type="date" value="' + esc(S.f.sbcFrom) + '">') + field("sbc-t", "Au", '<input id="sbc-t" type="date" value="' + esc(S.f.sbcTo) + '">') +
     '<span class="grow"></span><button class="btn" data-act="bc-xls-all">Exporter la liste (Excel)</button></div>',
-  bind() { ["sbc-q", "sbc-f", "sbc-t"].forEach(id => $("#" + id).addEventListener(id === "sbc-q" ? "input" : "change", () => { S.f.sbcQ = $("#sbc-q").value; S.f.sbcFrom = $("#sbc-f").value; S.f.sbcTo = $("#sbc-t").value; render(); })); },
-  rows() { const q = norm(S.f.sbcQ); return [...S.da.values()].filter(d => d.numBc && inPeriod(d.date, S.f.sbcFrom, S.f.sbcTo) && (daMatch(d, q) || norm(d.numBc).includes(q))).sort((a, b) => (b.bcAt || "").localeCompare(a.bcAt || "") || b.id - a.id); },
+  bind() { $("#sbc-s").value = S.f.sbcSt || ""; ["sbc-q", "sbc-s", "sbc-f", "sbc-t"].forEach(id => $("#" + id).addEventListener(id === "sbc-q" ? "input" : "change", () => { S.f.sbcQ = $("#sbc-q").value; S.f.sbcSt = $("#sbc-s").value; S.f.sbcFrom = $("#sbc-f").value; S.f.sbcTo = $("#sbc-t").value; render(); })); },
+  rows() { const q = norm(S.f.sbcQ); return [...S.bc.values()].filter(b => { const d = S.da.get(b.da); if (!d) return false;
+      return (!S.f.sbcSt || bcState(b)[0] === S.f.sbcSt) && inPeriod(d.date, S.f.sbcFrom, S.f.sbcTo) && (!q || norm([b.num, b.fourn, d.numero, ...bclOf(b.id).map(x => { const l = S.daL.get(x.dal) || {}; return (l.ref || "") + " " + (l.designation || "") + " " + (l.engin || ""); }), ...blsOf(b.id).map(x => x.num)].join(" ")).includes(q)); })
+      .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || "") || b.id - a.id); },
   body() { if (!S.canDA) return '<div class="empty">Réservé aux administrateurs, gestionnaires et magasiniers.</div>';
-    const r = this.rows(); return '<div class="more">' + r.length + " bon(s) de commande · " + r.reduce((t, d) => t + daLines(d.id).length, 0) + " ligne(s). Téléchargez chaque BC en PDF ou en Excel.</div>" + table(daCols("bc"), r, { empty: "Aucun BC activé." }); } };
+    const r = this.rows(), cnt = s => r.filter(b => bcState(b)[0] === s).length;
+    return '<div class="more">' + r.length + " BC · " + cnt("Non livré") + " non livré(s) · " + cnt("Partiellement livré") + " partiellement livré(s) · " + cnt("Livré") + " livré(s) · " + cnt("Soldé") + " soldé(s)</div>" + table([
+      { h: "Date DA", f: b => fD((S.da.get(b.da) || {}).date) }, { h: "N° DA", f: b => "<b>" + mono((S.da.get(b.da) || {}).numero) + "</b>" }, { h: "N° BC", f: b => '<b class="mono">' + esc(b.num) + "</b>" },
+      { h: "Code engin", f: b => codesHtml(bcEngins(b)) }, { h: "Lignes", n: 1, f: b => nb(bclOf(b.id).length) }, { h: "Fournisseur", f: b => esc(b.fourn) || '<span class="muted">–</span>' },
+      { h: "Statut", f: b => { const [t, c] = bcState(b); return '<span class="pill ' + c + '"' + (b.solde ? ' title="' + esc(b.solde) + '"' : "") + ">" + t + "</span>"; } },
+      { h: "Livrée", f: b => blsOf(b.id).map(x => '<span class="pill p-ok" title="Reçu le ' + esc(fD(x.date)) + '">✔ BL ' + esc(x.num) + "</span>").join(" ") + (S.canNumDA && bcOuvert(b) ? ' <button class="btn small primary bc-go" data-act="bl-start" data-id="' + b.id + '" title="Saisir un N° de BL">➜ BL</button>' : (blsOf(b.id).length ? "" : '<span class="muted">–</span>')) },
+      { h: "", f: b => bcActs(b) }], r, { empty: "Aucun BC." }); } };
 
-/* ---------- activation du bon de commande (magasinier / administrateur) ---------- */
+/* ---------- création / modification d'un BC ---------- */
 function bcStart(d) {
-  if (!S.canNumDA) return;
-  modal("Saisir le N° de BC – DA " + d.numero, '<div class="fgrid">' + F("bc-num", "N° de BC *", '<input id="bc-num" value="' + esc(d.numBc) + '" placeholder="ex. 4400012345" autocomplete="off">') +
-    F("bc-f", "Fournisseur", '<input id="bc-f" list="dl-fourn" value="' + esc(d.fourn) + '" autocomplete="off">') + "</div>",
-    async ov => { const num = fv(ov, "bc-num"); if (!num) return "Saisissez le N° de BC."; const fo = fv(ov, "bc-f"); setTimeout(() => bcQtyForm(d, num, fo), 0); }, "Valider le N° BC");
+  if (!S.canNumDA || !daAcommander(d)) return;
+  modal("Saisir le N° de BC – DA " + d.numero, '<div class="fgrid">' + F("bc-num", "N° de BC *", '<input id="bc-num" placeholder="ex. 4400012345" autocomplete="off">') +
+    F("bc-f", "Fournisseur", '<input id="bc-f" list="dl-fourn" autocomplete="off">') + "</div>" + (bcsOf(d.id).length ? '<p class="hint">Cette DA a déjà ' + bcsOf(d.id).length + " BC : " + bcsOf(d.id).map(b => esc(b.num)).join(", ") + ". Le nouveau BC portera sur les articles restants.</p>" : ""),
+    async ov => { const num = fv(ov, "bc-num"); if (!num) return "Saisissez le N° de BC."; const fo = fv(ov, "bc-f"); setTimeout(() => bcForm(d, null, num, fo), 0); }, "Valider le N° BC");
 }
-function bcQtyForm(d, num, fourn) { if (fourn === undefined) fourn = d.fourn;
-  const L = daLines(d.id), codes = [...new Set(L.map(l => l.engin).filter(Boolean))];
-  const head = '<div class="bc-head">' + (codes.length ? codes.map(c => '<div class="chip"><b class="mono">' + esc(c) + "</b> " + esc(enginTxt(c)) + "</div>").join("") : '<span class="muted">Code engin non précisé</span>') + "</div>";
-  const html = head + '<div class="fgrid">' + F("bq-num", "N° BC *", '<input id="bq-num" value="' + esc(num) + '">') + F("bq-da", "N° DA", '<input id="bq-da" value="' + esc(d.numero) + '" readonly>') + F("bq-f", "Fournisseur", '<input id="bq-f" list="dl-fourn" value="' + esc(fourn) + '">') + "</div>" +
-    '<div class="tw le"><table><thead><tr><th>N° Poste</th><th>Désignation Catalogue</th><th>Référence</th><th>Unité</th><th class="n">Qté DA</th><th class="n" style="width:110px">Qté BC *</th></tr></thead><tbody>' +
-    L.map(l => '<tr data-l="' + l.id + '"><td>' + esc(l.poste) + "</td><td>" + esc(l.designation) + "</td><td>" + mono(l.ref) + "</td><td>" + esc(l.unite) + '</td><td class="n"><b>' + nb(l.qte) + '</b></td><td><input class="bq-q" type="number" min="0" step="any" value="' + esc(l.qteBc ?? l.qte) + '"></td></tr>').join("") +
-    '</tbody></table></div><p class="hint">Qté BC proposée = qté DA ; modifiez-la si le bon de commande diffère.</p>';
-  const ov = modal("BC " + num, html, async ov => { const n2 = fv(ov, "bq-num"); if (!n2) return "Saisissez le N° de BC.";
-    const vals = [...ov.querySelectorAll("tr[data-l]")].map(tr => ({ id: +tr.dataset.l, q: tr.querySelector(".bq-q").value.trim() }));
-    if (vals.some(v => v.q === "" || !(+v.q.replace(",", ".") >= 0))) return "Saisissez une quantité BC valide sur chaque ligne (0 si l'article n'est pas commandé).";
-    for (const v of vals) { const r = await must(sb.from("da_lignes").update({ qte_bc: +v.q.replace(",", ".") }).eq("id", v.id).select()); if (!r.length) throw new Error("permission denied"); S.daL.set(r[0].id, mapDL(r[0])); }
-    const r = await must(sb.from("da").update({ num_bc: n2, fournisseur: fv(ov, "bq-f") || null }).eq("id", d.id).select().single()); S.da.set(r.id, mapDA(r)); schedule(); toast("BC " + n2 + " activé pour la DA " + d.numero + " : il est dans « Suivi BC »."); }, "Valider", true);
-  const b = ov.querySelector(".bq-q"); if (b) { b.focus(); b.select(); }
+function bcForm(d, b, num, fourn) {
+  const edit = !!b, L = daLines(d.id), cur = new Map(edit ? bclOf(b.id).map(x => [x.dal, x.qte]) : []);
+  const codes = [...new Set(L.map(l => l.engin).filter(Boolean))];
+  const head = '<div class="bc-head">' + codes.map(c => '<div class="chip"><b class="mono">' + esc(c) + "</b> " + esc(enginTxt(c)) + "</div>").join("") + "</div>";
+  const html = head + '<div class="fgrid">' + F("bq-num", "N° BC *", '<input id="bq-num" value="' + esc(edit ? b.num : num) + '">') + F("bq-da", "N° DA", '<input id="bq-da" value="' + esc(d.numero) + '" readonly>') +
+    F("bq-f", "Fournisseur", '<input id="bq-f" list="dl-fourn" value="' + esc(edit ? b.fourn : fourn) + '">') + "</div>" +
+    '<div class="tw le"><table><thead><tr><th>N° Poste</th><th>Désignation Catalogue</th><th>Référence</th><th>Unité</th><th class="n">Qté DA</th><th class="n">Déjà commandé</th><th class="n">Reste</th><th class="n" style="width:110px">Qté BC</th></tr></thead><tbody>' +
+    L.map(l => { const deja = commandeDal(l.id, edit ? b.id : null), reste = Math.max(0, N(l.qte) - deja), v = edit ? (cur.get(l.id) || 0) : reste, off = reste <= 0 && !cur.get(l.id);
+      return '<tr data-l="' + l.id + '" data-r="' + reste + '"' + (off ? ' class="muted"' : "") + "><td>" + esc(l.poste) + "</td><td>" + esc(l.designation) + "</td><td>" + mono(l.ref) + "</td><td>" + esc(l.unite) + '</td><td class="n"><b>' + nb(l.qte) + '</b></td><td class="n">' + nb(deja) +
+        '</td><td class="n">' + (reste > 0 ? '<span class="reste">' + nb(reste) + "</span>" : "0") + '</td><td><input class="bq-q" type="number" min="0" step="any" value="' + esc(v) + '"' + (off ? " disabled" : "") + "></td></tr>"; }).join("") +
+    '</tbody></table></div><p class="hint">Mettez <b>0</b> pour un article qui ne fait pas partie de ce BC : il restera « à commander » sur la DA (pour un autre BC, ou à clôturer).</p>';
+  const ov = modal((edit ? "Modifier le BC " : "BC ") + (edit ? b.num : num), html, async ov => {
+    const n2 = fv(ov, "bq-num"); if (!n2) return "Saisissez le N° de BC.";
+    const vals = [...ov.querySelectorAll("tr[data-l]")].map(tr => ({ dal: +tr.dataset.l, reste: +tr.dataset.r, s: tr.querySelector(".bq-q").value.trim(), poste: tr.children[0].textContent || tr.children[2].textContent }));
+    for (const v of vals) { const q = v.s === "" ? 0 : +v.s.replace(",", "."); if (!(q >= 0)) return "Quantité BC invalide."; if (q > v.reste + 1e-9) return "Qté BC supérieure au reste à commander (ligne " + (v.poste || "?") + " : reste " + nb(v.reste) + ")."; v.q = q; }
+    const lines = vals.filter(v => v.q > 0); if (!lines.length) return "Saisissez au moins une quantité BC.";
+    if (!edit) { const r = await must(sb.from("bc").insert({ da_id: d.id, num_bc: n2, fournisseur: fv(ov, "bq-f") || null, date_bc: today() }).select().single());
+      try { const ls = await must(sb.from("bc_lignes").insert(lines.map(v => ({ bc_id: r.id, dal_id: v.dal, qte_bc: v.q }))).select()); S.bc.set(r.id, mapBC(r)); ls.forEach(x => S.bcl.set(x.id, mapBCL(x))); }
+      catch (e) { await sb.from("bc").delete().eq("id", r.id); throw e; }
+      schedule(); toast("BC " + n2 + " créé (" + lines.length + " article(s)) – il est dans « Suivi BC »." + (daAcommander(d) ? " La DA reste dans Suivi DA pour les articles restants." : "")); return; }
+    const r = await must(sb.from("bc").update({ num_bc: n2, fournisseur: fv(ov, "bq-f") || null }).eq("id", b.id).select().single());
+    await must(sb.from("bc_lignes").delete().eq("bc_id", b.id)); bclOf(b.id).forEach(x => S.bcl.delete(x.id));
+    const ls = await must(sb.from("bc_lignes").insert(lines.map(v => ({ bc_id: b.id, dal_id: v.dal, qte_bc: v.q }))).select()); S.bc.set(r.id, mapBC(r)); ls.forEach(x => S.bcl.set(x.id, mapBCL(x))); schedule(); toast("BC " + n2 + " modifié."); }, "Valider", true);
+  const f = ov.querySelector(".bq-q:not([disabled])"); if (f) { f.focus(); f.select(); }
+}
+function daClotForm(d) {
+  const L = daLines(d.id).filter(l => resteCmd(l) > 0);
+  modal("Clôturer la DA " + d.numero, '<p class="muted" style="margin-top:0">Les articles suivants ne seront pas commandés et la DA quittera « Suivi DA ». Les BC déjà créés ne changent pas.</p>' +
+    table([{ h: "N° Poste", f: l => esc(l.poste) }, { h: "Désignation", f: l => esc(l.designation) }, { h: "Référence", f: l => mono(l.ref) }, { h: "Non traité", n: 1, f: l => '<span class="reste">' + nb(resteCmd(l)) + "</span>" }], L) +
+    F("cl-m", "Motif *", '<input id="cl-m" list="dl-motifs-da" placeholder="ex. Article non disponible, annulé par le demandeur…"><datalist id="dl-motifs-da"><option value="Article non disponible"><option value="Annulé par le demandeur"><option value="Remplacé par une autre référence"><option value="Déjà en stock"><option value="Hors budget"></datalist>'),
+    async ov => { const m = fv(ov, "cl-m"); if (!m) return "Saisissez le motif."; const r = await must(sb.from("da").update({ cloture_motif: m }).eq("id", d.id).select().single()); S.da.set(r.id, mapDA(r)); schedule(); toast("DA " + d.numero + " clôturée : " + m); }, "Clôturer la DA", true);
 }
 
-/* ---------- réception : N° BL → quantités livrées → entrées magasin (magasinier / administrateur) ---------- */
-function blStart(d) {
-  if (!S.canNumDA || d.numBl) return;
-  modal("Saisir le N° de BL – BC " + d.numBc, '<div class="fgrid">' + F("bl-num", "N° de BL *", '<input id="bl-num" autocomplete="off">') + F("bl-f", "Fournisseur", '<input id="bl-f" value="' + esc(d.fourn || "–") + '" readonly>') + "</div>",
-    async ov => { const num = fv(ov, "bl-num"); if (!num) return "Saisissez le N° de BL."; setTimeout(() => blQtyForm(d, num), 0); }, "Valider le N° BL");
+/* ---------- réception : N° BL → quantités livrées → entrées magasin ---------- */
+function blStart(b) {
+  if (!S.canNumDA || !bcOuvert(b)) return;
+  modal("Saisir le N° de BL – BC " + b.num, '<div class="fgrid">' + F("bl-num", "N° de BL *", '<input id="bl-num" autocomplete="off">') + F("bl-f", "Fournisseur", '<input id="bl-f" value="' + esc(b.fourn || "–") + '" readonly>') + "</div>" +
+    (blsOf(b.id).length ? '<p class="hint">Déjà reçu sur ce BC : ' + blsOf(b.id).map(x => "BL " + esc(x.num) + " (" + fD(x.date) + ")").join(", ") + ".</p>" : ""),
+    async ov => { const num = fv(ov, "bl-num"); if (!num) return "Saisissez le N° de BL."; setTimeout(() => blForm(b, num), 0); }, "Valider le N° BL");
 }
-function blQtyForm(d, num) {
-  const L = daLines(d.id), codes = [...new Set(L.map(l => l.engin).filter(Boolean))];
-  const head = '<div class="bc-head">' + (codes.length ? codes.map(c => '<div class="chip"><b class="mono">' + esc(c) + "</b> " + esc(enginTxt(c)) + "</div>").join("") : "") + '<div class="chip">BC <b>' + esc(d.numBc) + "</b></div>" + (d.fourn ? '<div class="chip">Fournisseur <b>' + esc(d.fourn) + "</b></div>" : "") + "</div>";
+function blForm(b, num) {
+  const d = S.da.get(b.da) || {}, L = bclOf(b.id).map(x => ({ x, l: S.daL.get(x.dal) || {}, liv: livreBcl(x.id) })), codes = bcEngins(b);
+  const head = '<div class="bc-head">' + codes.map(c => '<div class="chip"><b class="mono">' + esc(c) + "</b> " + esc(enginTxt(c)) + "</div>").join("") + '<div class="chip">BC <b>' + esc(b.num) + "</b></div>" + (b.fourn ? '<div class="chip">Fournisseur <b>' + esc(b.fourn) + "</b></div>" : "") + "</div>";
   const info = l => (C && l.ref ? C.info(l.ref) : null) || {};
   const html = head + '<div class="fgrid">' + F("bl-n2", "N° BL *", '<input id="bl-n2" value="' + esc(num) + '">') + F("bl-date", "Date de réception", '<input id="bl-date" type="date" value="' + today() + '">') + "</div>" +
-    '<div class="tw le"><table><thead><tr><th style="width:110px">Catégorie</th><th>N° Poste</th><th>Désignation Catalogue</th><th>Référence</th><th style="width:130px">Référence équi.</th><th style="width:120px">Marque</th><th>Unité</th><th class="n">Qté BC</th><th class="n" style="width:100px">Qté BL *</th><th>Code_Engin</th></tr></thead><tbody>' +
-    L.map(l => { const i = info(l); return '<tr data-l="' + l.id + '"><td><select class="bl-cat"><option value="FILTRE"' + (i.cat !== "PDR" ? " selected" : "") + '>Filtre</option><option value="PDR"' + (i.cat === "PDR" ? " selected" : "") + '>PDR</option></select></td><td>' + esc(l.poste) + "</td><td>" + esc(l.designation) + "</td><td>" + mono(l.ref) +
-      '</td><td><input class="bl-eq" value="' + esc(l.equiv || i.equiv || "") + '"></td><td><input class="bl-ma" list="dl-marques" value="' + esc(l.marque || i.marque || "") + '"></td><td>' + esc(l.unite) + '</td><td class="n"><b>' + nb(l.qteBc ?? l.qte) + '</b></td><td><input class="bl-q" type="number" min="0" step="any" value="' + esc(l.qteBl ?? l.qteBc ?? l.qte) + '"></td><td>' + mono(l.engin) + "</td></tr>"; }).join("") +
-    '</tbody></table></div><p class="hint">À la validation, chaque ligne livrée (Qté BL &gt; 0) est ajoutée dans <b>Entrées (BC / BL)</b> avec le N° BC, le N° BL, le fournisseur et l\'engin destinataire. Une livraison partielle laisse le reste à livrer visible dans les entrées.</p>';
-  const ov = modal("BL " + num + " – réception du BC " + d.numBc, html, async ov => {
+    '<div class="tw le"><table><thead><tr><th style="width:105px">Catégorie</th><th>N° Poste</th><th>Désignation Catalogue</th><th>Référence</th><th style="width:120px">Référence équi.</th><th style="width:110px">Marque</th><th>Unité</th><th class="n">Qté BC</th><th class="n">Déjà livré</th><th class="n">Reste</th><th class="n" style="width:95px">Qté BL</th><th>Code_Engin</th></tr></thead><tbody>' +
+    L.map(({ x, l, liv }) => { const i = info(l), reste = Math.max(0, x.qte - liv), off = reste <= 0;
+      return '<tr data-x="' + x.id + '" data-r="' + reste + '"' + (off ? ' class="muted"' : "") + '><td><select class="bl-cat"' + (off ? " disabled" : "") + '><option value="FILTRE"' + (i.cat !== "PDR" ? " selected" : "") + '>Filtre</option><option value="PDR"' + (i.cat === "PDR" ? " selected" : "") + '>PDR</option></select></td><td>' + esc(l.poste) + "</td><td>" + esc(l.designation) + "</td><td>" + mono(l.ref) +
+        '</td><td><input class="bl-eq" value="' + esc(i.equiv || "") + '"' + (off ? " disabled" : "") + '></td><td><input class="bl-ma" list="dl-marques" value="' + esc(i.marque || "") + '"' + (off ? " disabled" : "") + "></td><td>" + esc(l.unite) + '</td><td class="n"><b>' + nb(x.qte) + '</b></td><td class="n">' + nb(liv) +
+        '</td><td class="n">' + (reste > 0 ? '<span class="reste">' + nb(reste) + "</span>" : "0") + '</td><td><input class="bl-q" type="number" min="0" step="any" value="' + reste + '"' + (off ? " disabled" : "") + "></td><td>" + mono(l.engin) + "</td></tr>"; }).join("") +
+    '</tbody></table></div><p class="hint">Saisissez la quantité réellement livrée (0 si l\'article manque). Chaque ligne livrée est ajoutée dans <b>Entrées (BC / BL)</b>. Le reste reste attendu sur ce BC : un autre BL pourra le recevoir, ou « Solder » le BC s\'il ne sera jamais livré.</p>';
+  const ov = modal("BL " + num + " – réception du BC " + b.num, html, async ov => {
     const nbl = fv(ov, "bl-n2"), date = fv(ov, "bl-date") || today(); if (!nbl) return "Saisissez le N° de BL.";
-    const vals = [...ov.querySelectorAll("tr[data-l]")].map(tr => ({ l: S.daL.get(+tr.dataset.l), cat: tr.querySelector(".bl-cat").value, eq: tr.querySelector(".bl-eq").value.trim(), ma: tr.querySelector(".bl-ma").value.trim(), q: tr.querySelector(".bl-q").value.trim() }));
-    if (vals.some(v => v.q === "" || !(+v.q.replace(",", ".") >= 0))) return "Saisissez une quantité BL valide sur chaque ligne (0 si l'article n'est pas livré).";
-    const bad = vals.find(v => +v.q.replace(",", ".") > 0 && !v.l.ref && !v.l.designation); if (bad) return "Une ligne livrée n'a ni référence ni désignation.";
-    for (const v of vals) { const r = await must(sb.from("da_lignes").update({ qte_bl: +v.q.replace(",", "."), equiv: v.eq || null, marque: v.ma || null }).eq("id", v.l.id).select()); if (!r.length) throw new Error("permission denied"); S.daL.set(r[0].id, mapDL(r[0])); }
-    const rows = vals.filter(v => +v.q.replace(",", ".") > 0).map(v => ({ categorie: v.cat, date, ref: v.l.ref || v.l.designation, type: v.l.designation || null, marque: v.ma || null, equiv: v.eq || null,
-      qte_bc: v.l.qteBc ?? v.l.qte, qte_bl: +v.q.replace(",", "."), num_bc: d.numBc, num_bl: nbl, fournisseur: d.fourn || null, engin: v.l.engin && S.engins.has(v.l.engin) ? v.l.engin : null, obs: "DA " + d.numero }));
-    if (rows.length) { const ins = await must(sb.from("entrees").insert(rows).select()); ins.forEach(r => applyRow("entrees", r)); }
-    const r = await must(sb.from("da").update({ num_bl: nbl }).eq("id", d.id).select().single()); S.da.set(r.id, mapDA(r)); schedule();
-    toast("BL " + nbl + " réceptionné : " + rows.length + " article(s) ajouté(s) dans Entrées (BC / BL)."); }, "Valider", true);
-  const b = ov.querySelector(".bl-q"); if (b) { b.focus(); b.select(); }
+    const vals = [...ov.querySelectorAll("tr[data-x]")].map(tr => ({ x: S.bcl.get(+tr.dataset.x), reste: +tr.dataset.r, cat: tr.querySelector(".bl-cat").value, eq: tr.querySelector(".bl-eq").value.trim(), ma: tr.querySelector(".bl-ma").value.trim(), s: tr.querySelector(".bl-q").value.trim() }));
+    for (const v of vals) { const q = v.s === "" ? 0 : +v.s.replace(",", "."); if (!(q >= 0)) return "Quantité BL invalide."; if (q > v.reste + 1e-9) return "Qté BL supérieure au reste à livrer (reste " + nb(v.reste) + ")."; v.q = q; v.l = S.daL.get(v.x.dal) || {}; }
+    const lines = vals.filter(v => v.q > 0); if (!lines.length) return "Saisissez au moins une quantité livrée.";
+    if (lines.some(v => !v.l.ref && !v.l.designation)) return "Une ligne livrée n'a ni référence ni désignation.";
+    const r = await must(sb.from("bl").insert({ bc_id: b.id, num_bl: nbl, date_bl: date }).select().single()); S.bl.set(r.id, mapBL(r)); let n = 0;
+    try { for (const v of lines) {
+        const e = await must(sb.from("entrees").insert({ categorie: v.cat, date, ref: v.l.ref || v.l.designation, type: v.l.designation || null, marque: v.ma || null, equiv: v.eq || null, qte_bc: v.q, qte_bl: v.q,
+          num_bc: b.num, num_bl: nbl, fournisseur: b.fourn || null, engin: v.l.engin && S.engins.has(v.l.engin) ? v.l.engin : null, obs: "DA " + (d.numero || "") }).select().single()); applyRow("entrees", e);
+        const y = await must(sb.from("bl_lignes").insert({ bl_id: r.id, bcl_id: v.x.id, qte_bl: v.q, categorie: v.cat, equiv: v.eq || null, marque: v.ma || null, entree_id: e.id }).select().single()); S.bll.set(y.id, mapBLL(y)); n++; } }
+    catch (e) { schedule(); throw new Error("Réception interrompue après " + n + " article(s) : " + errMsg(e)); }
+    schedule(); const st = bcState(b)[0]; toast("BL " + nbl + " reçu : " + n + " article(s) ajouté(s) dans Entrées. BC " + b.num + " : " + st.toLowerCase() + "."); }, "Valider", true);
+  const f = ov.querySelector(".bl-q:not([disabled])"); if (f) { f.focus(); f.select(); }
+}
+function bcSoldeForm(b) {
+  const L = bclOf(b.id).map(x => ({ x, l: S.daL.get(x.dal) || {}, reste: Math.max(0, x.qte - livreBcl(x.id)) })).filter(o => o.reste > 0);
+  modal("Solder le BC " + b.num, '<p class="muted" style="margin-top:0">Les quantités restantes ne seront pas livrées : le BC passe en « Soldé ». Les BL déjà reçus et les entrées ne changent pas. Les articles non livrés redeviennent « à commander » sur la DA (dans Suivi DA) : vous pourrez les commander chez un autre fournisseur ou clôturer la DA.</p>' +
+    table([{ h: "Désignation", f: o => esc(o.l.designation) }, { h: "Référence", f: o => mono(o.l.ref) }, { h: "Qté BC", n: 1, f: o => nb(o.x.qte) }, { h: "Non livré", n: 1, f: o => '<span class="reste">' + nb(o.reste) + "</span>" }], L) +
+    F("so-m", "Motif *", '<input id="so-m" list="dl-motifs-bc" placeholder="ex. Indisponible chez le fournisseur"><datalist id="dl-motifs-bc"><option value="Indisponible chez le fournisseur"><option value="Rupture fournisseur"><option value="Annulé"><option value="Remplacé par un autre BC"></datalist>'),
+    async ov => { const m = fv(ov, "so-m"); if (!m) return "Saisissez le motif."; const r = await must(sb.from("bc").update({ solde_motif: m }).eq("id", b.id).select().single()); S.bc.set(r.id, mapBC(r)); schedule(); toast("BC " + b.num + " soldé : " + m); }, "Solder le BC", true);
+}
+function bcView(b) {
+  const d = S.da.get(b.da) || {}, [st] = bcState(b), L = bclOf(b.id).map(x => ({ x, l: S.daL.get(x.dal) || {}, liv: livreBcl(x.id) })), B = blsOf(b.id);
+  const html = '<div class="bc-head">' + bcEngins(b).map(c => '<div class="chip"><b class="mono">' + esc(c) + "</b> " + esc(enginTxt(c)) + "</div>").join("") + '<div class="chip">DA <b>' + esc(d.numero) + "</b></div>" + (b.fourn ? '<div class="chip">Fournisseur <b>' + esc(b.fourn) + "</b></div>" : "") + '<div class="chip">Statut <b>' + esc(st) + "</b></div></div>" +
+    (b.solde ? '<div class="banner info">BC soldé : ' + esc(b.solde) + " (" + esc(nameOf(b.soldeBy)) + ", " + fDT(b.soldeAt) + ")</div>" : "") +
+    table([{ h: "N° Poste", f: o => esc(o.l.poste) }, { h: "Désignation Catalogue", f: o => esc(o.l.designation) }, { h: "Référence", f: o => mono(o.l.ref) }, { h: "Unité", f: o => esc(o.l.unite) }, { h: "Qté BC", n: 1, f: o => "<b>" + nb(o.x.qte) + "</b>" },
+      { h: "Livré", n: 1, f: o => nb(o.liv) }, { h: "Reste", n: 1, f: o => { const r = Math.max(0, o.x.qte - o.liv); return r > 0 ? '<span class="' + (b.solde ? "muted" : "reste") + '">' + nb(r) + "</span>" : "0"; } }, { h: "Code_Engin", f: o => mono(o.l.engin) }], L) +
+    "<h4>Bons de livraison reçus</h4>" + table([{ h: "N° BL", f: x => mono(x.num) }, { h: "Date", f: x => fD(x.date) }, { h: "Articles", n: 1, f: x => nb(bllOf(x.id).length) }, { h: "Quantité", n: 1, f: x => nb(bllOf(x.id).reduce((t, y) => t + y.qte, 0)) }, { h: "Saisi par", f: x => who(x.createdBy) }], B, { empty: "Aucun BL reçu." }) +
+    '<div class="actions" style="justify-content:flex-start"><button type="button" class="btn" data-act="bc-pdf" data-id="' + b.id + '">Télécharger PDF</button><button type="button" class="btn" data-act="bc-xls" data-id="' + b.id + '">Télécharger Excel</button>' +
+    (S.canNumDA && bcOuvert(b) ? '<button type="button" class="btn primary" data-act="bl-start" data-id="' + b.id + '">➜ BL</button>' : "") + "</div>";
+  const ov = modal("BC " + b.num, html, async () => {}, "Fermer", true); ov.querySelector("#mf-cancel").hidden = true;
+  ov.addEventListener("click", e => { if (e.target.closest("[data-act]")) ov.remove(); });
+}
+
+/* ---------- exports BC ---------- */
+async function bcExcel(list, name) {
+  await loadScript("vendor/exceljs.min.js");
+  const wb = new ExcelJS.Workbook(); wb.creator = APPNAME; const one = list.length === 1;
+  const ws = wb.addWorksheet(fileSafe(one ? "BC " + list[0].num : "Suivi BC").slice(0, 31), { pageSetup: { paperSize: 9, orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
+  ws.columns = [{ width: 11 }, { width: 13 }, { width: 13 }, { width: 20 }, { width: 10 }, { width: 32 }, { width: 17 }, { width: 9 }, { width: 9 }, { width: 10 }, { width: 9 }, { width: 8 }, { width: 13 }, { width: 18 }];
+  const thin = { style: "thin" }, bd = { top: thin, left: thin, bottom: thin, right: thin };
+  const hr = ws.addRow(["Date", "DA", "N° BC", "Fournisseur", "N° Poste", "Désignation Catalogue", "Référance", "Qté DA", "Qté BC", "Qté livrée", "Reste", "Unité", "Code_Engin", "Statut BC"]); hr.height = 18.9;
+  hr.eachCell(c => { c.font = { name: "Arial", size: 9, bold: true }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } }; c.border = bd; c.alignment = { horizontal: "center", vertical: "middle", wrapText: true }; });
+  const numv = v => /^\d{1,15}$/.test(v || "") ? +v : (v || "");
+  for (const b of list) { const d = S.da.get(b.da) || {}, st = bcState(b)[0];
+    for (const x of bclOf(b.id)) { const l = S.daL.get(x.dal) || {}, liv = livreBcl(x.id);
+      const r = ws.addRow([isoToDate(d.date), numv(d.numero), numv(b.num), b.fourn, numv(l.poste), l.designation, l.ref, N(l.qte), x.qte, liv, Math.max(0, x.qte - liv), l.unite, numv(l.engin), st]);
+      r.eachCell({ includeEmpty: true }, (c, col) => { c.font = { name: "Arial", size: 10, bold: [9, 10, 13].includes(col) }; c.border = bd; c.alignment = { horizontal: [4, 6, 7].includes(col) ? "left" : "center", vertical: "middle" }; });
+      r.getCell(1).numFmt = "dd/mm/yyyy"; } }
+  ws.autoFilter = { from: "A1", to: { row: Math.max(1, ws.rowCount), column: 14 } }; ws.views = [{ state: "frozen", ySplit: 1 }];
+  saveBlob(new Blob([await wb.xlsx.writeBuffer()], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), name);
+}
+async function bcPdf(b) {
+  await loadScript("vendor/jspdf.umd.min.js"); await loadScript("vendor/jspdf.plugin.autotable.min.js");
+  const d = S.da.get(b.da) || {}, { jsPDF } = window.jspdf, doc = new jsPDF({ unit: "mm", format: "a4" }), W = 210, [st] = bcState(b), sp = v => nb(v).replace(/[  ]/g, " ");
+  doc.setFillColor(15, 76, 92); doc.rect(0, 0, W, 24, "F"); doc.setTextColor(255); doc.setFont("helvetica", "bold"); doc.setFontSize(16); doc.text("BON DE COMMANDE", 14, 11);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.text(S.params.nom_chantier || "", 14, 18);
+  doc.setFont("helvetica", "bold"); doc.setFontSize(13); doc.text("N° BC : " + b.num, W - 14, 11, { align: "right" }); doc.setFontSize(10.5); doc.text("N° DA : " + (d.numero || "-"), W - 14, 18.5, { align: "right" });
+  doc.setTextColor(30); const codes = bcEngins(b), eg = c => S.engins.get(String(c)) || {};
+  const info = [["Date de la DA", fD(d.date)], ["Fournisseur", b.fourn || "-"], ["Statut", st + (b.solde ? " (" + b.solde + ")" : "")]];
+  if (codes.length <= 1) { const c = codes[0] || "", e = eg(c); info.push(["Code engin", c || "-"], ["Désignation", e.designation || "-"], ["Marque", e.marque || "-"], ["Type", e.modele || "-"], ["N° de série", e.serie || "-"]); }
+  doc.autoTable({ startY: 30, body: info, theme: "plain", styles: { fontSize: 9.5, cellPadding: 1.2 }, columnStyles: { 0: { fontStyle: "bold", cellWidth: 38, textColor: [15, 76, 92] } }, margin: { left: 14, right: 14 } });
+  if (codes.length > 1) doc.autoTable({ startY: doc.lastAutoTable.finalY + 2, head: [["Code engin", "Désignation", "Marque", "Type", "N° de série"]], body: codes.map(c => { const e = eg(c); return [c, e.designation || "-", e.marque || "-", e.modele || "-", e.serie || "-"]; }),
+    theme: "grid", margin: { left: 14, right: 14 }, styles: { fontSize: 9, cellPadding: 1.6, lineColor: [160, 160, 160], lineWidth: 0.1, textColor: 20 }, headStyles: { fillColor: [222, 234, 237], textColor: [15, 76, 92], fontStyle: "bold" } });
+  doc.autoTable({ startY: doc.lastAutoTable.finalY + 4, head: [["N° Poste", "Désignation Catalogue", "Référence", "Qté BC", "Livré", "Reste", "Unité", "Code_Engin"]],
+    body: bclOf(b.id).map(x => { const l = S.daL.get(x.dal) || {}, liv = livreBcl(x.id); return [l.poste, l.designation, l.ref, sp(x.qte), sp(liv), sp(Math.max(0, x.qte - liv)), l.unite, l.engin]; }),
+    theme: "grid", margin: { left: 14, right: 14 }, styles: { fontSize: 9.5, cellPadding: 2, lineColor: [120, 120, 120], lineWidth: 0.1, textColor: 20 }, headStyles: { fillColor: [255, 255, 0], textColor: 0, fontStyle: "bold", halign: "center" },
+    columnStyles: { 0: { halign: "center", cellWidth: 17 }, 2: { cellWidth: 30 }, 3: { halign: "center", cellWidth: 15, fontStyle: "bold" }, 4: { halign: "center", cellWidth: 14 }, 5: { halign: "center", cellWidth: 14 }, 6: { halign: "center", cellWidth: 14 }, 7: { halign: "center", cellWidth: 25, fontStyle: "bold" } } });
+  const B = blsOf(b.id); if (B.length) doc.autoTable({ startY: doc.lastAutoTable.finalY + 6, head: [["Bons de livraison reçus", "Date", "Articles", "Quantité"]], body: B.map(x => ["BL " + x.num, fD(x.date), String(bllOf(x.id).length), sp(bllOf(x.id).reduce((t, y) => t + y.qte, 0))]),
+    theme: "grid", margin: { left: 14, right: 14 }, styles: { fontSize: 9, cellPadding: 1.6, lineColor: [160, 160, 160], lineWidth: 0.1, textColor: 20 }, headStyles: { fillColor: [222, 234, 237], textColor: [15, 76, 92], fontStyle: "bold" } });
+  const pages = doc.getNumberOfPages(); for (let p = 1; p <= pages; p++) { doc.setPage(p); doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(120); doc.text("page " + p + "/" + pages, W / 2, 290, { align: "center" }); }
+  doc.save("BC_" + fileSafe(b.num) + "_DA_" + fileSafe(d.numero || "") + ".pdf");
+}
+function onBcChange(t, p) {
+  const row = p.new, old = p.old, M = { bc: [S.bc, mapBC], bc_lignes: [S.bcl, mapBCL], bl: [S.bl, mapBL], bl_lignes: [S.bll, mapBLL] }[t];
+  if (p.eventType === "DELETE") M[0].delete(old.id); else M[0].set(row.id, M[1](row));
+  if (p.eventType === "INSERT" && t === "bc" && row.created_by !== S.uid) { const d = S.da.get(row.da_id); if (d && (d.createdBy === S.uid || S.isAdmin)) daNotify("✔ BC créé", "DA " + d.numero + " : BC " + row.num_bc + (row.fournisseur ? " (" + row.fournisseur + ")" : "") + ". Il est dans « Suivi BC »."); }
+  if (p.eventType === "INSERT" && t === "bl" && row.created_by !== S.uid) { const b = S.bc.get(row.bc_id), d = b && S.da.get(b.da); if (d && (d.createdBy === S.uid || S.isAdmin)) daNotify("📦 Livraison reçue", "BC " + b.num + " : BL " + row.num_bl + " réceptionné."); }
+  schedule();
 }
 
 /* ---------- formulaire DA ---------- */
@@ -775,8 +902,11 @@ function daView(d) {
   const L = daLines(d.id);
   const html = '<div class="kpis">' + kpi("Statut", d.statut === "numerotee" ? "N° " + esc(d.numero) : "En attente", d.statut === "numerotee" ? "txt" : "warn") + kpi("Date DA", fD(d.date), "txt") + kpi("Lignes", nb(L.length)) + kpi("Qté totale", nb(L.reduce((t, l) => t + N(l.qte), 0))) + "</div>" +
     '<p class="muted">' + (d.engin ? "Engin principal : <b>" + esc(d.engin) + "</b> " + esc(enginTxt(d.engin)) + " · " : "") + (d.objet ? "Objet : " + esc(d.objet) + " · " : "") + "Demandeur : " + esc(nameOf(d.createdBy)) + " · créée le " + fDT(d.createdAt) + (d.numAt ? " · N° saisi par " + esc(nameOf(d.numBy)) + " le " + fDT(d.numAt) : "") + "</p>" +
-    (d.numBc ? '<div class="banner ok">Bon de commande <b>' + esc(d.numBc) + "</b>" + (d.fourn ? " · fournisseur <b>" + esc(d.fourn) + "</b>" : "") + " · activé par " + esc(nameOf(d.bcBy)) + " le " + fDT(d.bcAt) + (d.numBl ? " · <b>BL " + esc(d.numBl) + "</b> réceptionné le " + fDT(d.blAt) : "") + "</div>" : "") +
-    table([{ h: "N° Poste", f: l => esc(l.poste) }, { h: "Désignation Catalogue", f: l => esc(l.designation) }, { h: "Référence", f: l => mono(l.ref) }, { h: d.numBc ? "Qté DA" : "Quantité", n: 1, f: l => "<b>" + nb(l.qte) + "</b>" }].concat(d.numBc ? [{ h: "Qté BC", n: 1, f: l => "<b>" + nb(l.qteBc) + "</b>" }] : [], d.numBl ? [{ h: "Qté BL", n: 1, f: l => "<b>" + nb(l.qteBl) + "</b>" }, { h: "Réf. équi.", f: l => esc(l.equiv) }, { h: "Marque", f: l => esc(l.marque) }] : [], [{ h: "Unité", f: l => esc(l.unite) }, { h: "Code_Engin", f: l => mono(l.engin) }]), L, { empty: "Aucune ligne." }) +
+    (d.cloture ? '<div class="banner info">DA clôturée : ' + esc(d.cloture) + " (" + esc(nameOf(d.clotBy)) + ", " + fDT(d.clotAt) + ")</div>" : "") +
+    (bcsOf(d.id).length ? '<div class="banner ok">Bons de commande : ' + bcsOf(d.id).map(b => "<b>" + esc(b.num) + "</b>" + (b.fourn ? " (" + esc(b.fourn) + ")" : "") + " · " + esc(bcState(b)[0])).join(" ; ") + "</div>" : "") +
+    table([{ h: "N° Poste", f: l => esc(l.poste) }, { h: "Désignation Catalogue", f: l => esc(l.designation) }, { h: "Référence", f: l => mono(l.ref) }, { h: "Qté DA", n: 1, f: l => "<b>" + nb(l.qte) + "</b>" }].concat(d.statut === "numerotee" ? [
+      { h: "Commandé", n: 1, f: l => nb(commandeDal(l.id)) }, { h: "Reste à commander", n: 1, f: l => { const r = resteCmd(l); return r > 0 ? '<span class="' + (d.cloture ? "muted" : "reste") + '">' + nb(r) + (d.cloture ? " (non traité)" : "") + "</span>" : "0"; } },
+      { h: "BC", f: l => [...S.bcl.values()].filter(x => x.dal === l.id).map(x => mono((S.bc.get(x.bc) || {}).num) + " ×" + nb(x.qte)).join("<br>") || '<span class="muted">–</span>' }] : [], [{ h: "Unité", f: l => esc(l.unite) }, { h: "Code_Engin", f: l => mono(l.engin) }]), L, { empty: "Aucune ligne." }) +
     '<div class="actions" style="justify-content:flex-start">' + (canViewDevis(d) ? '<button type="button" class="btn" data-act="da-devis" data-id="' + d.id + '">📄 Voir le devis</button>' : "") + '<button type="button" class="btn" data-act="da-pdf" data-id="' + d.id + '">Télécharger PDF</button><button type="button" class="btn" data-act="da-xls" data-id="' + d.id + '">Télécharger Excel</button>' +
     (S.canNumDA && d.statut === "en_attente" ? '<button type="button" class="btn primary" data-act="da-num" data-id="' + d.id + '">Saisir N° DA</button>' : "") + "</div>";
   const ov = modal(daLabel(d), html, async () => {}, "Fermer", true); ov.querySelector("#mf-cancel").hidden = true;
@@ -842,14 +972,14 @@ async function daExcel(list, name) {
   const wb = new ExcelJS.Workbook(); wb.creator = APPNAME;
   const one = list.length === 1, d0 = list[0];
   const ws = wb.addWorksheet(fileSafe(one ? (d0.engin || d0.numero || "DA") : "Suivi DA").slice(0, 31), { pageSetup: { paperSize: 9, orientation: "portrait", fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
-  const bc = list.some(d => d.numBc);
+  const bc = false;
   ws.columns = bc ? [{ width: 11 }, { width: 13 }, { width: 13 }, { width: 11 }, { width: 32.45 }, { width: 17.73 }, { width: 8.09 }, { width: 8.09 }, { width: 8 }, { width: 15 }] : [{ width: 11 }, { width: 13 }, { width: 11 }, { width: 32.45 }, { width: 17.73 }, { width: 8.09 }, { width: 8 }, { width: 15 }];
   const thin = { style: "thin" }, bd = { top: thin, left: thin, bottom: thin, right: thin };
   const hr = ws.addRow(bc ? ["Date", "DA", "N° BC", "N° Poste", "Désignation Catalogue", "Référance", "Qté DA", "Qté BC", "Unité", "Code_Engin"] : ["Date", "DA", "N° Poste", "Désignation Catalogue", "Référance", "Quantité", "Unité", "Code_Engin"]); hr.height = 18.9;
   hr.eachCell(c => { c.font = { name: "Arial", size: 9, bold: true }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } }; c.border = bd; c.alignment = { horizontal: "center", vertical: "middle" }; });
   for (const d of list) for (const l of daLines(d.id)) {
     const num = /^\d{1,15}$/.test(d.numero) ? +d.numero : (d.numero || ""), poste = /^\d{1,9}$/.test(l.poste) ? +l.poste : l.poste, eng = /^\d{1,9}$/.test(l.engin) ? +l.engin : l.engin;
-    const nbc = /^\d{1,15}$/.test(d.numBc) ? +d.numBc : (d.numBc || "");
+    const nbc = "";
     const r = ws.addRow(bc ? [isoToDate(d.date), num, nbc, poste, l.designation, l.ref, N(l.qte), l.qteBc ?? "", l.unite, eng] : [isoToDate(d.date), num, poste, l.designation, l.ref, N(l.qte), l.unite, eng]);
     const left = bc ? [5, 6] : [4, 5], bold = bc ? [7, 8, 10] : [6, 8];
     r.eachCell({ includeEmpty: true }, (c, col) => { c.font = { name: "Arial", size: 10, bold: bold.includes(col) }; c.border = bd; c.alignment = { horizontal: left.includes(col) ? "left" : "center", vertical: "middle" }; });
@@ -863,7 +993,7 @@ async function daPdf(d) {
   doc.setFillColor(15, 76, 92); doc.rect(0, 0, W, 24, "F"); doc.setTextColor(255); doc.setFont("helvetica", "bold"); doc.setFontSize(16); doc.text("DEMANDE D'ACHAT", 14, 11);
   doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.text(S.params.nom_chantier || "", 14, 18);
   doc.setFont("helvetica", "bold"); doc.setFontSize(13); doc.text(d.numero ? "N° DA : " + d.numero : "N° DA : en attente", W - 14, 11, { align: "right" });
-  doc.setFont("helvetica", d.numBc ? "bold" : "normal"); doc.setFontSize(d.numBc ? 11 : 9); doc.text(d.numBc ? "N° BC : " + d.numBc : "Réf. interne #" + d.id, W - 14, 18.5, { align: "right" });
+  doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.text("Réf. interne #" + d.id, W - 14, 18.5, { align: "right" });
   doc.setTextColor(30);
   // engin(s) : le code saisi dans Code_Engin des lignes → désignation, marque, type (modèle), série de la fiche engin
   const codes = [...new Set(L.map(l => l.engin).filter(Boolean))], eg = c => S.engins.get(String(c)) || {};
@@ -875,14 +1005,13 @@ async function daPdf(d) {
     doc.autoTable({ startY: doc.lastAutoTable.finalY + 2, head: [["Code engin", "Désignation", "Marque", "Type", "N° de série"]], body: codes.map(c => { const e = eg(c); return [c, e.designation || "-", e.marque || "-", e.modele || "-", e.serie || "-"]; }),
       theme: "grid", margin: { left: 14, right: 14 }, styles: { fontSize: 9, cellPadding: 1.6, lineColor: [160, 160, 160], lineWidth: 0.1, textColor: 20 }, headStyles: { fillColor: [222, 234, 237], textColor: [15, 76, 92], fontStyle: "bold" } }); }
   const sp = v => nb(v).replace(/[\u202f\u00a0]/g, " ");
-  doc.autoTable({ startY: doc.lastAutoTable.finalY + 4, head: [d.numBc ? ["N° Poste", "Désignation Catalogue", "Référence", "Qté DA", "Qté BC", "Unité", "Code_Engin"] : ["N° Poste", "Désignation Catalogue", "Référence", "Quantité", "Unité", "Code_Engin"]],
-    body: L.map(l => d.numBc ? [l.poste, l.designation, l.ref, sp(l.qte), sp(l.qteBc), l.unite, l.engin] : [l.poste, l.designation, l.ref, sp(l.qte), l.unite, l.engin]),
+  doc.autoTable({ startY: doc.lastAutoTable.finalY + 4, head: [["N° Poste", "Désignation Catalogue", "Référence", "Quantité", "Unité", "Code_Engin"]],
+    body: L.map(l => [l.poste, l.designation, l.ref, sp(l.qte), l.unite, l.engin]),
     theme: "grid", margin: { left: 14, right: 14 },
     styles: { fontSize: 9.5, cellPadding: 2, lineColor: [120, 120, 120], lineWidth: 0.1, textColor: 20 }, headStyles: { fillColor: [255, 255, 0], textColor: 0, fontStyle: "bold", halign: "center" },
-    columnStyles: d.numBc ? { 0: { halign: "center", cellWidth: 18 }, 2: { cellWidth: 32 }, 3: { halign: "center", cellWidth: 17, fontStyle: "bold" }, 4: { halign: "center", cellWidth: 17, fontStyle: "bold" }, 5: { halign: "center", cellWidth: 15 }, 6: { halign: "center", cellWidth: 24, fontStyle: "bold" } }
-      : { 0: { halign: "center", cellWidth: 20 }, 2: { cellWidth: 36 }, 3: { halign: "center", cellWidth: 20, fontStyle: "bold" }, 4: { halign: "center", cellWidth: 16 }, 5: { halign: "center", cellWidth: 26, fontStyle: "bold" } } });
+    columnStyles: { 0: { halign: "center", cellWidth: 20 }, 2: { cellWidth: 36 }, 3: { halign: "center", cellWidth: 20, fontStyle: "bold" }, 4: { halign: "center", cellWidth: 16 }, 5: { halign: "center", cellWidth: 26, fontStyle: "bold" } } });
   const pages = doc.getNumberOfPages(); for (let p = 1; p <= pages; p++) { doc.setPage(p); doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(120); doc.text("page " + p + "/" + pages, W / 2, 290, { align: "center" }); }
-  doc.save((d.numBc ? "BC_" + fileSafe(d.numBc) + "_DA_" : "DA_") + fileSafe(d.numero || ("interne_" + d.id)) + (d.engin ? "_" + fileSafe(d.engin) : "") + ".pdf");
+  doc.save("DA_" + fileSafe(d.numero || ("interne_" + d.id)) + (d.engin ? "_" + fileSafe(d.engin) : "") + ".pdf");
 }
 
 /* ---------- notifications DA ---------- */
@@ -893,8 +1022,6 @@ function onDaChange(p) {
   if (p.eventType === "DELETE") { S.da.delete(old.id); daLines(old.id).forEach(l => S.daL.delete(l.id)); schedule(); return; }
   const was = S.da.get(row.id); S.da.set(row.id, mapDA(row));
   if (p.eventType === "INSERT" && row.created_by !== S.uid && S.canNumDA && row.statut === "en_attente") daNotify("🔔 Nouvelle demande d'achat", "#" + row.id + " de " + nameOf(row.created_by) + (row.engin ? " · engin " + row.engin : "") + " : à numéroter dans « Création DA ».");
-  if (p.eventType === "UPDATE" && row.num_bl && was && !was.numBl && row.bl_by !== S.uid && (row.created_by === S.uid || S.isAdmin)) daNotify("📦 Livraison reçue", "BC " + row.num_bc + " : BL " + row.num_bl + " réceptionné, articles entrés en magasin.");
-  if (p.eventType === "UPDATE" && row.num_bc && was && !was.numBc && row.bc_by !== S.uid && (row.created_by === S.uid || S.isAdmin)) daNotify("✔ BC activé", "DA " + row.numero_da + " : BC " + row.num_bc + ". Il est dans « Suivi BC ».");
   if (p.eventType === "UPDATE" && row.numero_da && (!was || !was.numero) && row.numero_by !== S.uid && (row.created_by === S.uid || S.isAdmin)) daNotify("✔ DA numérotée", "Demande #" + row.id + " : N° DA " + row.numero_da + " saisi par " + nameOf(row.numero_by) + ". Elle est dans « Suivi DA ».");
   schedule();
 }
@@ -1189,18 +1316,30 @@ document.addEventListener("click", async e => { const b = e.target.closest("[dat
     if (a === "da-imp") return daImportDialog();
     if (a === "da-tpl") { const l = document.createElement("a"); l.href = "modeles/Canevas_DA.xlsx"; l.download = "Canevas_DA.xlsx"; document.body.appendChild(l); l.click(); l.remove(); return; }
     if (a === "da-notif") { await Notification.requestPermission(); render(true); return; }
-    if (a === "bc-xls-all") { const r = VIEWS.suivibc.rows(); if (!r.length) { toast("Aucun BC à exporter."); return; } return await daExcel(r, "Suivi_BC_" + today() + ".xlsx"); }
-    if ((a.startsWith("da-") || a.startsWith("bc-") || a === "bl-start") && a !== "da-xls-all") { const d = S.da.get(+id); if (!d) return;
+    if (a === "bc-xls-all") { const r = VIEWS.suivibc.rows(); if (!r.length) { toast("Aucun BC à exporter."); return; } return await bcExcel(r, "Suivi_BC_" + today() + ".xlsx"); }
+    if (["bc-view", "bc-pdf", "bc-xls", "bc-edit", "bc-solde", "bc-del", "bl-start"].includes(a)) { const b = S.bc.get(+id); if (!b) return; const d = S.da.get(b.da) || {};
+      if (a === "bc-view") return bcView(b);
+      if (a === "bc-pdf") return await bcPdf(b);
+      if (a === "bc-xls") return await bcExcel([b], "BC_" + fileSafe(b.num) + "_DA_" + fileSafe(d.numero || "") + ".xlsx");
+      if (!S.canNumDA) return;
+      if (a === "bl-start") return blStart(b);
+      if (a === "bc-edit") return blsOf(b.id).length ? toast("Ce BC a déjà des livraisons : il ne peut plus être modifié.") : bcForm(d, b);
+      if (a === "bc-solde") return bcSoldeForm(b);
+      if (a === "bc-del") { if (blsOf(b.id).length) { toast("Ce BC a déjà des livraisons : il ne peut pas être supprimé."); return; }
+        return confirmBox("Supprimer le BC " + b.num + " ? Les articles redeviennent « à commander » sur la DA " + (d.numero || "") + ".", async () => {
+          const r = await must(sb.from("bc").delete().eq("id", b.id).select()); if (!r.length) throw new Error("permission denied"); bclOf(b.id).forEach(x => S.bcl.delete(x.id)); S.bc.delete(b.id); schedule(); toast("BC " + b.num + " supprimé."); }); } }
+    if ((a.startsWith("da-") || a === "bc-start") && a !== "da-xls-all") { const d = S.da.get(+id); if (!d) return;
       if (a === "da-view") return daView(d);
       if (a === "bc-start") return bcStart(d);
-      if (a === "bl-start") return blStart(d);
-      if (a === "bc-edit") return S.canNumDA && bcQtyForm(d, d.numBc);
+      if (a === "da-clot") return S.canNumDA && daClotForm(d);
+      if (a === "da-reopen") return S.canNumDA && modal("Rouvrir la DA " + d.numero, "<p>Les articles non commandés redeviennent « à commander » et la DA revient dans « Suivi DA ».</p>", async () => {
+        const r = await must(sb.from("da").update({ cloture_motif: null }).eq("id", d.id).select().single()); S.da.set(r.id, mapDA(r)); schedule(); toast("DA " + d.numero + " rouverte."); }, "Rouvrir");
       if (a === "da-devis") return canViewDevis(d) && await openDevis(d);
       if (a === "da-edit") return canEditDA(d) && daForm(d);
       if (a === "da-num") return S.canNumDA && daNumForm(d);
       if (a === "da-del") return confirmBox("Supprimer la demande d'achat #" + d.id + " (" + daLines(d.id).length + " ligne(s)) ?", async () => { const r = await must(sb.from("da").delete().eq("id", d.id).select()); if (!r.length) throw new Error("permission denied"); if (d.devisPath) sb.storage.from("devis").remove([d.devisPath]).catch(() => {}); S.da.delete(d.id); daLines(d.id).forEach(l => S.daL.delete(l.id)); schedule(); toast("Demande supprimée."); });
       if (a === "da-pdf") { toast("Préparation du PDF…"); return await daPdf(d); }
-      if (a === "da-xls") return await daExcel([d], (d.numBc ? "BC_" + fileSafe(d.numBc) + "_" : "") + "DA_" + fileSafe(d.numero || ("interne_" + d.id)) + (d.engin ? "_" + fileSafe(d.engin) : "") + ".xlsx"); }
+      if (a === "da-xls") return await daExcel([d], "DA_" + fileSafe(d.numero || ("interne_" + d.id)) + (d.engin ? "_" + fileSafe(d.engin) : "") + ".xlsx"); }
     if (a === "da-xls-all") { const r = VIEWS.suivida.rows(); if (!r.length) { toast("Aucune DA à exporter."); return; } return await daExcel(r, "Suivi_DA_" + today() + ".xlsx"); }
     if (a === "new-sortie") return sortieForm();
     if (a === "imp-entrees") return importDialog("entrees");
@@ -1272,13 +1411,16 @@ async function startApp() {
   if (par) S.params = Object.assign(S.params, par); S.journal = jr; applyHeader();
   { const [he, hs, hc] = await Promise.all([fetchAll("huile_entrees", "id"), fetchAll("huile_sorties", "id"), fetchAll("huile_conso", "id")]);
     S.hEnt = new Map(he.map(r => [r.id, mapHE(r)])); S.hSor = new Map(hs.map(r => [r.id, mapHS(r)])); S.hCon = new Map(hc.map(r => [r.id, mapHC(r)])); }
-  if (S.canDA) { const [da, dl] = await Promise.all([fetchAll("da", "id"), fetchAll("da_lignes", "id")]); S.da = new Map(da.map(r => [r.id, mapDA(r)])); S.daL = new Map(dl.map(r => [r.id, mapDL(r)])); }
+  if (S.canDA) { const [da, dl] = await Promise.all([fetchAll("da", "id"), fetchAll("da_lignes", "id")]); S.da = new Map(da.map(r => [r.id, mapDA(r)])); S.daL = new Map(dl.map(r => [r.id, mapDL(r)]));
+    const [bc, bcl, bl, bll] = await Promise.all(["bc", "bc_lignes", "bl", "bl_lignes"].map(t => fetchAll(t, "id")));
+    S.bc = new Map(bc.map(r => [r.id, mapBC(r)])); S.bcl = new Map(bcl.map(r => [r.id, mapBCL(r)])); S.bl = new Map(bl.map(r => [r.id, mapBL(r)])); S.bll = new Map(bll.map(r => [r.id, mapBLL(r)])); }
   S.loaded = true; compute(); fillLists(); render(true);
   sb.channel("filtres").on("postgres_changes", { event: "*", schema: "public" }, p => {
     const t = p.table, row = p.new, old = p.old;
     if (t === "journal") { if (p.eventType === "INSERT") { S.journal.unshift(row); if (S.journal.length > 1500) S.journal.length = 1500; if (row.user_id !== S.uid && (row.table_name === "entrees" || row.table_name === "sorties") && row.action === "insert") notifyInsert(row); renderNav(); if (S.view === "dash" || S.view === "journal") schedule(); } return; }
     if (t === "profiles") { loadProfiles().then(() => schedule()); return; }
     if (t === "da") { if (S.canDA) onDaChange(p); return; }
+    if (["bc", "bc_lignes", "bl", "bl_lignes"].includes(t)) { if (S.canDA) onBcChange(t, p); return; }
     if (t === "da_lignes") { if (S.canDA) { if (p.eventType === "DELETE") S.daL.delete(old.id); else S.daL.set(row.id, mapDL(row)); schedule(); } return; }
     if (t === "params") { if (row) { S.params = Object.assign(S.params, row); applyHeader(); schedule(true); } return; }
     const maps = { entrees: [S.entrees, mapE], sorties: [S.sorties, mapS], stock_depart: [S.depart, mapD], huile_entrees: [S.hEnt, mapHE], huile_sorties: [S.hSor, mapHS], huile_conso: [S.hCon, mapHC] };
