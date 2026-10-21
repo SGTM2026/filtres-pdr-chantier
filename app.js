@@ -668,8 +668,7 @@ function daActs(d, where) {
 function daCols(where) {
   if (where === "suivi") return [{ h: "Date DA", f: d => fD(d.date) }, { h: "N° DA", f: d => "<b>" + mono(d.numero) + "</b>" },
     { h: "Code engin", f: d => { const c = [...new Set(daLines(d.id).map(l => l.engin).filter(Boolean))]; return c.length ? codesHtml(c) : (d.engin ? mono(d.engin) : codesHtml([])); } },
-    { h: "Lignes", n: 1, f: d => nb(daLines(d.id).length) }, { h: "Statut", f: d => { const [t, c] = daCmdState(d); return '<span class="pill ' + c + '"' + (d.cloture ? ' title="' + esc(d.cloture) + '"' : "") + ">" + esc(t) + "</span>"; } },
-    { h: "Activer BC", f: d => S.canNumDA && daAcommander(d) ? '<button class="btn small primary bc-go" data-act="bc-start" data-id="' + d.id + '" title="Saisir un N° de BC">➜ BC</button>' : '<span class="muted">–</span>' }, { h: "", f: d => daActs(d, where) }];
+    { h: "Lignes", n: 1, f: d => nb(daLines(d.id).length) }, { h: "Activer BC", f: d => S.canNumDA && daAcommander(d) ? '<button class="btn small primary bc-go" data-act="bc-start" data-id="' + d.id + '" title="Saisir un N° de BC">➜ BC</button>' : '<span class="muted">–</span>' }, { h: "", f: d => daActs(d, where) }];
   return [{ h: "Réf. interne", f: d => mono("#" + d.id) }, { h: "Date DA", f: d => fD(d.date) },
     { h: "Engin", f: d => d.engin ? mono(d.engin) + ' <span class="muted">' + esc(enginTxt(d.engin)) + "</span>" : '<span class="muted">Plusieurs</span>' },
     { h: "Lignes", n: 1, f: d => nb(daLines(d.id).length) }, { h: "Qté totale", n: 1, f: d => nb(daLines(d.id).reduce((t, l) => t + N(l.qte), 0)) },
@@ -679,10 +678,9 @@ const daMatch = (d, q) => !q || norm([d.id, d.numero, d.engin, enginTxt(d.engin)
 
 VIEWS.suivida = { title: "Suivi DA",
   tools: () => '<div class="tools">' + searchF("sda-q", S.f.sdaQ, "N° DA, engin, référence…") + field("sda-f", "Du", '<input id="sda-f" type="date" value="' + esc(S.f.sdaFrom) + '">') + field("sda-t", "Au", '<input id="sda-t" type="date" value="' + esc(S.f.sdaTo) + '">') +
-    '<label class="chk" style="align-self:flex-end;margin-bottom:8px"><input type="checkbox" id="sda-all"' + (S.f.sdaAll ? " checked" : "") + "> Afficher aussi les DA entièrement commandées ou clôturées</label>" +
     '<span class="grow"></span><button class="btn" data-act="da-xls-all">Exporter la liste (Excel)</button></div>',
-  bind() { ["sda-q", "sda-f", "sda-t", "sda-all"].forEach(id => $("#" + id).addEventListener(id === "sda-q" ? "input" : "change", () => { S.f.sdaQ = $("#sda-q").value; S.f.sdaFrom = $("#sda-f").value; S.f.sdaTo = $("#sda-t").value; S.f.sdaAll = $("#sda-all").checked; render(); })); },
-  rows() { const q = norm(S.f.sdaQ); return [...S.da.values()].filter(d => d.statut === "numerotee" && (S.f.sdaAll || daAcommander(d)) && inPeriod(d.date, S.f.sdaFrom, S.f.sdaTo) && daMatch(d, q)).sort((a, b) => (b.numAt || "").localeCompare(a.numAt || "") || b.id - a.id); },
+  bind() { ["sda-q", "sda-f", "sda-t"].forEach(id => $("#" + id).addEventListener(id === "sda-q" ? "input" : "change", () => { S.f.sdaQ = $("#sda-q").value; S.f.sdaFrom = $("#sda-f").value; S.f.sdaTo = $("#sda-t").value; render(); })); },
+  rows() { const q = norm(S.f.sdaQ); return [...S.da.values()].filter(d => d.statut === "numerotee" && daAcommander(d) && inPeriod(d.date, S.f.sdaFrom, S.f.sdaTo) && daMatch(d, q)).sort((a, b) => (b.numAt || "").localeCompare(a.numAt || "") || b.id - a.id); },
   body() { if (!S.canDA) return '<div class="empty">Réservé aux administrateurs, gestionnaires et magasiniers.</div>';
     const r = this.rows(); return '<div class="more">' + r.length + " demande(s) · cliquez « ➜ BC » pour créer un bon de commande (une DA peut en avoir plusieurs). La DA reste ici tant qu'il reste des articles à commander ; « Clôturer » marque les articles restants comme non traités.</div>" + table(daCols("suivi"), r, { empty: "Aucune demande à commander." }); } };
 
