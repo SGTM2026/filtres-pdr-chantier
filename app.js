@@ -199,6 +199,11 @@ function bcAttente() { if (!S.canDA || !S.bc) return [];
   return out; }
 const attActs = x => x.fromBc ? '<div class="rowact"><button class="btn small" data-act="bc-view" data-id="' + x.fromBc + '">Voir BC</button></div>' : rowActs("entree", x);
 
+/* lignes de DA d'un engin encore à commander (DA en attente du N° ou numérotées, non clôturées) */
+function daNonTraitees(code) { const out = [];
+  for (const l of S.daL.values()) { const d = S.da.get(l.da); if (!d || d.cloture) continue; if (String(l.engin || d.engin || "") !== code) continue;
+    const cmd = commandeDal(l.id), reste = Math.max(0, N(l.qte) - cmd); if (reste > 0) out.push({ d, l, cmd, reste }); }
+  return out.sort((a, b) => (b.d.date || "").localeCompare(a.d.date || "") || b.d.id - a.d.id || a.l.id - b.l.id); }
 /* ---------- vues ---------- */
 const VIEWS = {};
 VIEWS.dash = { title: "Tableau de bord", body() {
@@ -277,6 +282,12 @@ VIEWS.engin = { title: "Suivi par engin",
       { h: "Sorties", n: 1, f: l => nb(l.sor) }, { h: "Stock", n: 1, f: l => "<b>" + nb(l.stock) + "</b>" }, { h: "Statut", f: l => pill(l.statut) }, { h: "Dern. sortie", f: l => fD(l.lastS) }], L, { empty: "Aucun stock affecté : les articles de cet engin sont pris sur le stock commun." }) + "</div>";
     h += '<div class="panel"><h3>Commandés non livrés <small>toutes dates</small></h3>' + table([{ h: "Cat.", f: x => catPill(x.cat) }, { h: "Date", f: x => fD(x.date) }, { h: "Référence", f: x => mono(x.ref) }, { h: "Désignation / type", f: x => esc(x.type) }, { h: "Qté BC", n: 1, f: x => nb(x.dem) }, { h: "Qté BL", n: 1, f: x => nb(x.liv || 0) },
       { h: "Reste", n: 1, f: x => '<span class="reste">' + nb(x.reste) + "</span>" }, { h: "N° BC", f: x => esc(x.bc) }, { h: "N° BL", f: x => esc(x.bl) || (x.fromBc ? '<span class="muted">en attente</span>' : "") }, { h: "", f: attActs }], att, { empty: "Aucune commande en attente." }) + "</div>";
+    if (S.canDA) { const dn = daNonTraitees(code);
+      h += '<div class="panel"><h3>DA non traitées <small>demandes d\'achat de cet engin pas encore commandées</small></h3>' + table([{ h: "Date DA", f: x => fD(x.d.date) }, { h: "N° DA", f: x => x.d.numero ? "<b>" + mono(x.d.numero) + "</b>" : '<span class="pill p-warn">En attente du N°</span>' },
+        { h: "Type", f: x => daType(x.d) }, { h: "Objet DA", f: x => esc(x.d.objet) || '<span class="muted">–</span>' }, { h: "N° Poste", f: x => esc(x.l.poste) }, { h: "Désignation", f: x => esc(x.l.designation) }, { h: "Référence", f: x => mono(x.l.ref) },
+        { h: "Qté DA", n: 1, f: x => nb(x.l.qte) }, { h: "Commandé", n: 1, f: x => nb(x.cmd) }, { h: "Reste à commander", n: 1, f: x => '<span class="reste">' + nb(x.reste) + "</span>" }, { h: "Unité", f: x => esc(x.l.unite) },
+        { h: "Statut", f: x => !x.d.numero ? '<span class="pill p-warn">À numéroter</span>' : (x.cmd > 0 ? '<span class="pill p-acc">Partiellement commandée</span>' : '<span class="pill p-warn">À commander</span>') },
+        { h: "", f: x => '<div class="rowact"><button class="btn small" data-act="da-view" data-id="' + x.d.id + '">Voir DA</button></div>' }], dn, { empty: "Aucune DA en cours pour cet engin." }) + "</div>"; }
     const mv = s => s.mvt === "sans" ? "Sans entrée en magasin" : (s.engin === code ? (s.stockEng === code ? "Propre stock" : (s.stockEng === "" ? "Stock commun" : "Emprunté au " + s.stockEng)) : "Prêté au " + s.engin);
     h += '<div class="panel"><h3>Sorties liées à cet engin <small>filtres et PDR montés sur lui ou pris sur son stock</small></h3>' + table([{ h: "Cat.", f: s => catPill(s.cat) }, { h: "Date", f: s => fD(s.date) }, { h: "Référence", f: s => mono(s.ref) }, { h: "Désignation / type", f: s => esc(s.type) }, { h: "Qté", n: 1, f: s => nb(s.qte) },
       { h: "Monté sur", f: s => esc(s.engin) }, { h: "Mouvement", f: s => esc(mv(s)) }, { h: "Intervention", f: s => esc(s.intervention) }, { h: "Compteur", n: 1, f: s => nb(s.compteur) }, { h: "Saisi par", f: s => who(s.createdBy) }], so, { limit: 80, empty: "Aucune sortie." }) + "</div>";
