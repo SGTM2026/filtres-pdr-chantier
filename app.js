@@ -1262,7 +1262,7 @@ const hTab = () => { const t = S.f.hTab || "stock"; return H_TABS().some(x => x[
 VIEWS.huiles = { title: () => "Suivi huiles – " + (H_TABS().find(t => t[0] === hTab()) || [, ""])[1],
   tools() { const t = hTab();
     let h = '<div class="subtabs">' + H_TABS().map(([k, l]) => '<button class="btn" data-htab="' + k + '" aria-pressed="' + (k === t) + '">' + l + "</button>").join("") + "</div>";
-    const hSel = '<select id="h-h"><option value="">Toutes les huiles</option>' + huilesList().map(x => '<option' + (x === S.f.hHuile ? " selected" : "") + ">" + esc(x) + "</option>").join("") + "</select>";
+    const hSel = '<select id="h-h"><option value="">Toutes les huiles</option>' + (t === "conso" || t === "alim" ? huilesConso() : huilesList()).map(x => '<option' + (x === S.f.hHuile ? " selected" : "") + ">" + esc(x) + "</option>").join("") + "</select>";
     if (t === "ent") h += '<div class="tools">' + searchF("h-q", S.f.hQ, "BC, BL, fournisseur…") + field("h-h", "Huile", hSel) + '<span class="grow"></span><button class="btn" data-act="h-xls" data-k="ent">Exporter Excel</button>' + (S.canWrite ? '<button class="btn" data-act="imp-h_ent">Importer Excel</button><button class="btn primary" data-act="h-new-ent">+ Entrée de fûts</button>' : "") + "</div>";
     if (t === "sor") h += '<div class="tools">' + searchF("h-q", S.f.hQ, "N° bon de sortie, atelier…") + field("h-h", "Huile", hSel) + '<span class="grow"></span><button class="btn" data-act="h-xls" data-k="sor">Exporter Excel</button>' + (S.canWrite ? '<button class="btn" data-act="imp-h_sor">Importer Excel</button><button class="btn primary" data-act="h-new-sor">+ Bon de sortie</button>' : "") + "</div>";
     if (t === "conso") h += '<div class="tools">' + searchF("h-q", S.f.hQ, "Code engin, entretien…") + field("h-h", "Huile", hSel) + field("h-f", "Du", '<input id="h-f" type="date" value="' + esc(S.f.hFrom) + '">') + field("h-t", "Au", '<input id="h-t" type="date" value="' + esc(S.f.hTo) + '">') +
@@ -1305,11 +1305,11 @@ const daysBetween = (a, b) => a && b ? Math.max(0, Math.round((Date.parse(b) - D
 function hFuts() {
   const G = new Map(), g = (at, h) => { const k = at + "|" + h; if (!G.has(k)) G.set(k, { atelier: at, huile: h, futs: [], depasse: 0, cons: [] }); return G.get(k); };
   const sors = [...S.hSor.values()].sort((a, b) => (b.depart - a.depart) || (a.date || "").localeCompare(b.date || "") || a.id - b.id);
-  for (const s of sors) { const o = g(s.atelier || "Non précisé", s.huile), cap1 = s.depart ? s.litres : s.cont; let n = s.futs, i = 0;
+  for (const s of sors) { if (isGraisse(s.huile)) continue; const o = g(s.atelier || "Non précisé", s.huile), cap1 = s.depart ? s.litres : s.cont; let n = s.futs, i = 0;
     while (n > 1e-9) { const part = Math.min(1, n); i++; o.futs.push({ src: s, atelier: o.atelier, huile: o.huile, date: s.date, cap: cap1 * part, cont: s.cont * part, cons: 0, engins: new Set(), n: 0, last: "",
       label: s.depart ? "Fût ouvert (avant l'application)" : "BS " + (s.numBs || "#" + s.id) + (s.futs > 1 ? " · fût " + i + "/" + Math.ceil(s.futs) : "") }); n -= part; } }
   const cons = [...S.hCon.values()].sort((a, b) => (a.date || "").localeCompare(b.date || "") || a.id - b.id);
-  for (const c of cons) { const o = g(c.atelier || "Non précisé", c.huile); o.cons.push(c); let q = c.qte;
+  for (const c of cons) { if (isGraisse(c.huile)) continue; const o = g(c.atelier || "Non précisé", c.huile); o.cons.push(c); let q = c.qte;
     for (const u of o.futs) { if (q <= 1e-9) break; const r = u.cap - u.cons; if (r <= 1e-9) continue; const t = Math.min(r, q); u.cons += t; q -= t; u.engins.add(c.engin); u.n++; if ((c.date || "") > u.last) u.last = c.date; }
     if (q > 1e-9) o.depasse += q; }
   const t = today(), d30 = ymd(new Date(Date.now() - 30 * 864e5)), futs = [];
@@ -1371,7 +1371,9 @@ function hDepForm(d) { const isNew = !d; d = d || { date: today(), huile: S.f.hH
 }
 
 /* ---------- formulaires huiles ---------- */
-const huileSel = (id, v) => '<select id="' + id + '">' + huilesList().map(x => "<option" + (x === v ? " selected" : "") + ">" + esc(x) + "</option>").join("") + "</select>";
+const isGraisse = h => /^EP\s*\d/i.test(String(h || "").trim());   // EP0, EP2 : graisses, sans suivi de consommation par engin ni fûts en atelier
+const huilesConso = () => huilesList().filter(h => !isGraisse(h));
+const huileSel = (id, v, list) => '<select id="' + id + '">' + (list || huilesList()).map(x => "<option" + (x === v ? " selected" : "") + ">" + esc(x) + "</option>").join("") + "</select>";
 const atelierSel = (id, v) => { const L = (S.params.ateliers || ["ATELIER FIXE", "ATELIER MOBILE G", "ATELIER MOBILE S"]).slice(); if (v && !L.includes(v)) L.push(v); return '<select id="' + id + '">' + L.map(x => "<option" + (x === v ? " selected" : "") + ">" + esc(x) + "</option>").join("") + "</select>"; };
 async function hSave(table, map, store, d, row, label) {
   if (!d.id) { const r = await must(sb.from(table).insert(row).select().single()); store.set(r.id, map(r)); toast(label + " enregistré(e)."); }
@@ -1396,7 +1398,7 @@ function hSorForm(d) { d = d || { date: today(), huile: S.f.hHuile || huilesList
   ["hs-h", "hs-n"].forEach(id => ov.querySelector("#" + id).addEventListener("input", upd)); ov.querySelector("#hs-h").addEventListener("change", upd); upd(); }
 function hConForm(d) { d = d || { date: today(), huile: S.f.hHuile || huilesList()[0], entretien: "Vidange", atelier: S.f.hLastAt || (S.params.ateliers || [])[0] };
   const ov = modal(d.id ? "Modifier la consommation" : "Consommation d'huile sur un engin", '<div class="fgrid">' + F("hc-date", "Date", '<input id="hc-date" type="date" value="' + esc(d.date) + '">') + F("hc-eng", "Code engin *", '<input id="hc-eng" list="dl-engins" value="' + esc(d.engin) + '">') +
-    F("hc-h", "Type d'huile *", huileSel("hc-h", d.huile)) + F("hc-e", "Type d'entretien *", '<select id="hc-e">' + ENTRETIENS.map(x => "<option" + (x === d.entretien ? " selected" : "") + ">" + x + "</option>").join("") + "</select>") +
+    F("hc-h", "Type d'huile *", huileSel("hc-h", isGraisse(d.huile) ? huilesConso()[0] : d.huile, huilesConso())) + F("hc-e", "Type d'entretien *", '<select id="hc-e">' + ENTRETIENS.map(x => "<option" + (x === d.entretien ? " selected" : "") + ">" + x + "</option>").join("") + "</select>") +
     F("hc-q", "Quantité (litres) *", '<input id="hc-q" type="number" min="0" step="any" value="' + esc(d.qte ?? "") + '">') + F("hc-at", "Atelier *", atelierSel("hc-at", d.atelier)) + F("hc-cpt", "Compteur (h / km)", '<input id="hc-cpt" type="number" min="0" step="any" value="' + esc(d.compteur ?? "") + '">') +
     F("hc-obs", "Observations", '<input id="hc-obs" value="' + esc(d.obs) + '">', "full") + '<div class="hint full" id="hc-info"></div></div>',
     async ov => { const eng = fv(ov, "hc-eng"), q = fnum(ov, "hc-q"); if (!eng) return "Saisissez le code engin."; if (!C.engMap.has(eng)) return "Code engin inconnu : choisissez-le dans la liste."; if (!(q > 0)) return "Saisissez la quantité en litres.";
