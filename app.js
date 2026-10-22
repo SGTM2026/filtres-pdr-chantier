@@ -631,7 +631,7 @@ const mapDA = r => ({ id: r.id, date: r.date_da || "", engin: r.engin || "", obj
 const mapDL = r => ({ id: r.id, da: r.da_id, poste: r.poste || "", designation: r.designation || "", ref: r.ref || "", qte: r.qte, qteBc: r.qte_bc, qteBl: r.qte_bl, equiv: r.equiv || "", marque: r.marque || "", unite: r.unite || "", engin: r.engin || "", obs: r.obs || "" });
 const daLines = id => [...S.daL.values()].filter(l => l.da === id).sort((a, b) => a.id - b.id);
 const daLabel = d => d.numero ? "DA " + d.numero : "Demande #" + d.id;
-const canEditDA = d => d.statut === "en_attente" && (S.isAdmin || (["gestionnaire", "magasinier"].includes(S.role) && d.createdBy === S.uid));
+const canEditDA = d => d.statut === "en_attente" && (S.isAdmin || (["gestionnaire", "magasinier", "saisie"].includes(S.role) && d.createdBy === S.uid));
 const daPending = () => [...S.da.values()].filter(d => d.statut === "en_attente");
 const enginTxt = code => { if (!code) return ""; const e = S.engins.get(String(code)); return e ? [e.designation, e.marque, e.modele].filter(Boolean).join(" ") : ""; };
 const canViewDevis = d => !!d.devisPath && (S.isAdmin || S.role === "magasinier" || d.createdBy === S.uid);
@@ -653,13 +653,13 @@ VIEWS.da = { title: "Création DA",
     (("Notification" in window) && Notification.permission === "default" && S.canNumDA ? '<button class="btn" data-act="da-notif">Activer les notifications</button>' : "") +
     (S.canCreateDA ? '<button class="btn" data-act="da-tpl">Télécharger le canevas DA</button><button class="btn" data-act="da-imp">Importer Excel</button><button class="btn primary" data-act="da-new">+ Nouvelle demande d\'achat</button>' : "") + "</div>",
   bind() { $("#da-q").oninput = e => { S.f.daQ = e.target.value; render(); }; },
-  body() { if (!S.canDA) return '<div class="empty">Réservé aux administrateurs, gestionnaires et magasiniers.</div>';
+  body() { if (!S.canDA) return '<div class="empty">Réservé aux administrateurs, gestionnaires, magasiniers et comptes de saisie.</div>';
     const q = norm(S.f.daQ), pend = daPending().filter(d => daMatch(d, q)).sort((a, b) => b.id - a.id);
     let h = "";
     if (S.canNumDA) h += pend.length ? '<div class="banner crit">🔔 ' + pend.length + " demande(s) d'achat en attente de votre numéro de DA. Cliquez « Saisir N° DA » : la demande passe alors dans « Suivi DA ».</div>" : '<div class="banner ok">✔ Aucune demande d\'achat en attente de numéro.</div>';
     else h += '<div class="banner info">Créez la demande (ou importez votre tableau) : le magasinier et l\'administrateur sont notifiés, puis le magasinier saisit le N° de DA et la demande passe dans « Suivi DA ».</div>';
     h += '<div class="panel"><h3>Demandes en attente du N° DA <small>' + pend.length + "</small></h3>" + table(daCols("crea"), pend, { empty: "Aucune demande en attente." }) + "</div>";
-    if (S.role === "gestionnaire") { const mine = [...S.da.values()].filter(d => d.createdBy === S.uid && d.statut === "numerotee").sort((a, b) => (b.numAt || "").localeCompare(a.numAt || "")).slice(0, 10);
+    if (S.role === "gestionnaire" || S.role === "saisie") { const mine = [...S.da.values()].filter(d => d.createdBy === S.uid && d.statut === "numerotee").sort((a, b) => (b.numAt || "").localeCompare(a.numAt || "")).slice(0, 10);
       h += '<div class="panel"><h3>Mes dernières demandes numérotées</h3>' + table([{ h: "N° DA", f: d => "<b>" + mono(d.numero) + "</b>" }, { h: "Date DA", f: d => fD(d.date) }, { h: "Engin", f: d => mono(d.engin) }, { h: "Numérotée le", f: d => fDT(d.numAt) }, { h: "", f: d => daActs(d, "suivi") }], mine, { empty: "Aucune pour l'instant." }) + "</div>"; }
     return h; } };
 
@@ -715,7 +715,7 @@ VIEWS.suivida = { title: "Suivi DA",
     '<span class="grow"></span><button class="btn" data-act="da-xls-all">Exporter la liste (Excel)</button></div>',
   bind() { ["sda-q", "sda-f", "sda-t"].forEach(id => $("#" + id).addEventListener(id === "sda-q" ? "input" : "change", () => { S.f.sdaQ = $("#sda-q").value; S.f.sdaFrom = $("#sda-f").value; S.f.sdaTo = $("#sda-t").value; render(); })); },
   rows() { const q = norm(S.f.sdaQ); return [...S.da.values()].filter(d => d.statut === "numerotee" && daAcommander(d) && inPeriod(d.date, S.f.sdaFrom, S.f.sdaTo) && daMatch(d, q)).sort((a, b) => (b.numAt || "").localeCompare(a.numAt || "") || b.id - a.id); },
-  body() { if (!S.canDA) return '<div class="empty">Réservé aux administrateurs, gestionnaires et magasiniers.</div>';
+  body() { if (!S.canDA) return '<div class="empty">Réservé aux administrateurs, gestionnaires, magasiniers et comptes de saisie.</div>';
     const r = this.rows(); return '<div class="more">' + r.length + " demande(s) · cliquez « ➜ BC » pour créer un bon de commande (une DA peut en avoir plusieurs). La DA reste ici tant qu'il reste des articles à commander ; « Clôturer » marque les articles restants comme non traités.</div>" + table(daCols("suivi"), r, { empty: "Aucune demande à commander." }); } };
 
 /* ---------- Suivi BC (une ligne par bon de commande) ---------- */
@@ -734,7 +734,7 @@ VIEWS.suivibc = { title: "Suivi BC",
   rows() { const q = norm(S.f.sbcQ); return [...S.bc.values()].filter(b => { const d = S.da.get(b.da); if (!d) return false;
       return (!S.f.sbcSt || bcState(b)[0] === S.f.sbcSt) && inPeriod(d.date, S.f.sbcFrom, S.f.sbcTo) && (!q || norm([b.num, b.fourn, d.numero, ...bclOf(b.id).map(x => { const l = S.daL.get(x.dal) || {}; return (l.ref || "") + " " + (l.designation || "") + " " + (l.engin || ""); }), ...blsOf(b.id).map(x => x.num)].join(" ")).includes(q)); })
       .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || "") || b.id - a.id); },
-  body() { if (!S.canDA) return '<div class="empty">Réservé aux administrateurs, gestionnaires et magasiniers.</div>';
+  body() { if (!S.canDA) return '<div class="empty">Réservé aux administrateurs, gestionnaires, magasiniers et comptes de saisie.</div>';
     const r = this.rows(), cnt = s => r.filter(b => bcState(b)[0] === s).length;
     return '<div class="more">' + r.length + " BC · " + cnt("Non livré") + " non livré(s) · " + cnt("Partiellement livré") + " partiellement livré(s) · " + cnt("Livré") + " livré(s) · " + cnt("Soldé") + " soldé(s)</div>" + table([
       { h: "Date DA", f: b => fD((S.da.get(b.da) || {}).date) }, { h: "N° DA", f: b => "<b>" + mono((S.da.get(b.da) || {}).numero) + "</b>" }, { h: "N° BC", f: b => '<b class="mono">' + esc(b.num) + "</b>" }, { h: "Objet DA", f: b => esc((S.da.get(b.da) || {}).objet) || '<span class="muted">–</span>' },
@@ -952,7 +952,7 @@ const DA_COLS = [["date", "Date", ["date", "datedemande", "dateda"]], ["num", "D
   ["designation", "Désignation Catalogue", ["designationcatalogue", "designation", "libelle", "article", "description"]], ["ref", "Référance", ["referance", "reference", "ref", "codearticle", "refpiece", "referencefiltre"]],
   ["qte", "Quantité", ["quantite", "qte", "qtedemandee", "quantitedemandee"]], ["unite", "Unité", ["unite", "unites", "um", "udm", "uniteqte", "unitedemesure"]], ["engin", "Code_Engin", ["codeengin", "engin", "codeengins", "enginconcerne"]]];
 function daImportDialog() {
-  if (!S.canCreateDA) { toast("Seuls l'administrateur, le gestionnaire et le magasinier créent des demandes d'achat."); return; }
+  if (!S.canCreateDA) { toast("Les comptes Consultation ne créent pas de demandes d'achat."); return; }
   let groups = [];
   const html = '<p class="muted" style="margin-top:0">Choisissez votre tableau de demande d\'achat (.xlsx, .xls ou .csv) au format du canevas : <b>Date · DA · N° Poste · Désignation Catalogue · Référance · Quantité · Unité · Code_Engin</b> (la colonne Unité est facultative). Chaque feuille devient une demande ; si la colonne DA contient plusieurs numéros, une demande est créée par numéro.</p>' +
     '<div class="fgrid">' + F("di-type", "Type de demande *", '<select id="di-type"><option value="">– choisir –</option><option value="FILTRE">Filtre</option><option value="PDR">PDR (pièces de rechange)</option></select>') +
@@ -1518,7 +1518,7 @@ async function startApp() {
   await loadProfiles(); const me = S.me;
   if (!me || !me.actif) { await sb.auth.signOut(); showLogin("Ce compte n'est pas actif. Contactez l'administrateur."); return; }
   S.role = me.role; S.isAdmin = me.role === "admin"; S.canWrite = S.isAdmin || me.role === "saisie" || me.role === "magasinier";
-  S.canDA = ["admin", "gestionnaire", "magasinier"].includes(me.role); S.canCreateDA = ["admin", "gestionnaire", "magasinier"].includes(me.role); S.canNumDA = ["admin", "magasinier"].includes(me.role); S.lastSeen = me.last_seen || null;
+  S.canDA = ["admin", "gestionnaire", "magasinier", "saisie"].includes(me.role); S.canCreateDA = S.canDA; S.canNumDA = ["admin", "magasinier"].includes(me.role); S.lastSeen = me.last_seen || null;
   $("#me-box").innerHTML = '<span class="who">' + avatar(S.uid) + '<span class="nm">' + esc(me.nom || me.identifiant) + "</span></span>" + '<span class="role ' + (S.isAdmin ? "admin" : "") + '">' + esc(ROLE_FR[me.role]) + '</span><button class="btn small" data-act="logout">Déconnexion</button>';
   try { const v = localStorage.getItem("fc-view"); if (v && canSee(v)) S.view = v; else if (!S.isAdmin) S.view = "stock"; const c = localStorage.getItem("fc-cat"); if (c === "PDR" || c === "FILTRE") S.f.cat = c; } catch (_) {}
   const [eng, dep, ent, sor, par, jr] = await Promise.all([fetchAll("engins", "code"), fetchAll("stock_depart", "id"), fetchAll("entrees", "id"), fetchAll("sorties", "id"),
