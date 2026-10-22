@@ -1280,7 +1280,7 @@ VIEWS.huiles = { title: () => "Suivi huiles – " + (H_TABS().find(t => t[0] ===
       { h: "Huile", f: c => "<b>" + esc(c.huile) + "</b>" }, { h: "Entretien", f: c => '<span class="pill ' + (c.entretien === "Fuite" ? "p-crit" : c.entretien === "Vidange" ? "p-info" : "p-warn") + '">' + esc(c.entretien) + "</span>" }, { h: "Qté", n: 1, f: c => "<b>" + L_(c.qte) + "</b>" },
       { h: "Atelier", f: c => esc(c.atelier) }, { h: "Compteur", n: 1, f: c => nb(c.compteur) }, { h: "Observations", f: c => esc(c.obs) }, { h: "Saisi par", f: c => who(c.createdBy) }, { h: "", f: c => acts("con", c) }], r, { empty: "Aucune consommation." }); }
     return ""; } };
-document.addEventListener("change", e => { if (e.target.id === "h-at") { S.f.hAt = e.target.value; render(); } if (e.target.id === "h-eng") { S.f.hEng = e.target.value; render(); } });
+document.addEventListener("change", e => { if (e.target.id === "h-at") { S.f.hAt = e.target.value; render(); } if (e.target.id === "h-eng") { S.f.hEng = e.target.value.trim().split(/\s+[–-]\s+/)[0]; render(); const i = $("#h-eng"); if (i) i.focus(); } });
 document.addEventListener("click", e => { const b = e.target.closest("[data-htab]"); if (!b) return; S.f.hTab = b.dataset.htab; S.f.hQ = ""; render(true); });
 
 /* ---------- alimentation atelier : fûts sortis du magasin (ou déjà ouverts) et leur consommation, fût par fût ---------- */
@@ -1329,11 +1329,12 @@ function hAlimBody() {
 /* consommation d'un engin : totaux par huile, nombre d'interventions par type, historique */
 function hEnginConsoPanel() {
   const all = [...S.hCon.values()], codes = [...new Set(all.map(c => c.engin).filter(Boolean))].sort((a, b) => a.localeCompare(b, "fr", { numeric: true }));
-  if (S.f.hEng && !codes.includes(S.f.hEng)) S.f.hEng = "";
-  const sel = '<select id="h-eng" style="width:auto;min-width:280px"><option value="">– choisir un engin –</option>' + codes.map(c => '<option value="' + esc(c) + '"' + (c === S.f.hEng ? " selected" : "") + ">" + esc(c + (C.label(c) ? " – " + C.label(c) : "")) + "</option>").join("") + "</select>";
+  const sel = '<input id="h-eng" list="dl-h-eng" value="' + esc(S.f.hEng || "") + '" placeholder="Écrire ou choisir le code engin" autocomplete="off" style="width:auto;min-width:260px"><datalist id="dl-h-eng">' + codes.map(c => '<option value="' + esc(c) + '">' + esc(C.label(c) || "") + "</option>").join("") + "</datalist>";
   let h = '<div class="panel"><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px"><h3 style="margin:0">Consommation par engin</h3><span class="grow"></span><label class="muted" for="h-eng" style="font-size:12px;text-transform:uppercase;letter-spacing:.05em">Engin</label>' + sel + "</div>";
   if (!codes.length) return h + '<div class="empty">Aucune consommation saisie pour l\'instant.</div></div>';
-  if (!S.f.hEng) return h + '<div class="empty">Choisissez un engin pour voir sa consommation d\'huile et son historique.</div></div>';
+  if (!S.f.hEng) return h + '<div class="empty">Écrivez ou choisissez un code engin pour voir sa consommation d\'huile et son historique.</div></div>';
+  if (!codes.includes(S.f.hEng)) return h + '<div class="empty">' + (C.engMap.has(S.f.hEng) ? "Aucune consommation d'huile saisie pour l'engin " + esc(S.f.hEng) + " (" + esc(C.label(S.f.hEng)) + ")." : "Code engin « " + esc(S.f.hEng) + " » inconnu.") + "</div></div>";
+  h = h.replace('<h3 style="margin:0">Consommation par engin</h3>', '<h3 style="margin:0">Consommation par engin <small>' + esc(S.f.hEng + (C.label(S.f.hEng) ? " – " + C.label(S.f.hEng) : "")) + "</small></h3>");
   const L = all.filter(c => c.engin === S.f.hEng).sort((a, b) => (b.date || "").localeCompare(a.date || "") || b.id - a.id), cnt = t => L.filter(c => c.entretien === t).length;
   h += '<div class="kpis">' + kpi("Total consommé", L_(L.reduce((t, c) => t + c.qte, 0)), "txt") + kpi("Vidanges", nb(cnt("Vidange"))) + kpi("Fuites", nb(cnt("Fuite")), cnt("Fuite") ? "crit" : "") + kpi("Remises à niveau", nb(cnt("Remise à niveau"))) + kpi("Interventions", nb(L.length)) + "</div>";
   const byH = [...new Set(L.map(c => c.huile))].map(hu => { const X = L.filter(c => c.huile === hu), n = t => X.filter(c => c.entretien === t).length; return { huile: hu, tot: X.reduce((t, c) => t + c.qte, 0), vid: n("Vidange"), fui: n("Fuite"), niv: n("Remise à niveau"), last: X[0].date }; }).sort((a, b) => b.tot - a.tot);
