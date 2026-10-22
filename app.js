@@ -392,7 +392,7 @@ function sortieForm(d) { d = d || { date: today(), cat: S.f.cat, intervention: S
     F("s-ref", "Référence *", '<input id="s-ref" list="dl-refs" value="' + esc(d.ref) + '" autocomplete="off">') + F("s-qte", "Quantité *", '<input id="s-qte" type="number" min="0" step="any" inputmode="decimal" value="' + esc(d.qte ?? 1) + '">') +
     F("s-init", "Engin initial (si article emprunté)", '<input id="s-init" list="dl-engins" value="' + esc(d.enginInit) + '"><div class="hint">Vide : propre stock de l\'engin, sinon stock commun.</div>') +
     F("s-cpt", "Compteur (h / km)", '<input id="s-cpt" type="number" min="0" step="1" inputmode="numeric" value="' + esc(d.compteur ?? "") + '">') + F("s-int", "Type d'intervention", '<select id="s-int">' + opts(S.params.interventions, d.intervention) + "</select>") +
-    F("s-at", "Atelier", '<select id="s-at"><option value=""></option>' + opts(S.params.ateliers, d.atelier) + "</select>") + F("s-obs", "Observations", '<input id="s-obs" value="' + esc(d.obs) + '">', "full") + '<div class="hint full" id="s-info"></div></div>';
+    F("s-at", "Atelier", '<select id="s-at"><option value=""></option>' + opts(d.atelier && !S.params.ateliers.includes(d.atelier) ? S.params.ateliers.concat([d.atelier]) : S.params.ateliers, d.atelier) + "</select>") + F("s-obs", "Observations", '<input id="s-obs" value="' + esc(d.obs) + '">', "full") + '<div class="hint full" id="s-info"></div></div>';
   const ov = modal(isNew ? "Nouvelle sortie" : "Modifier la sortie", html, async ov => {
     const eng = fv(ov, "s-engin"), ref = fv(ov, "s-ref"), qte = fnum(ov, "s-qte"), init = fv(ov, "s-init");
     if (!eng || !C.engMap.has(eng)) return "Choisissez le code engin dans la liste."; if (!ref) return "Saisissez la référence."; if (!qte || qte <= 0) return "La quantité doit être supérieure à 0.";
@@ -469,7 +469,7 @@ const IMPORT = {
     help: ["1. Une ligne par ajout d'huile sur un engin.", "2. Type d'entretien : Vidange, Fuite ou Remise à niveau.", "3. Code engin : celui de la liste des engins. Atelier : ATELIER FIXE ou ATELIER MOBILE.", "4. Supprimez la ligne d'exemple avant l'import."] }
 };
 const matchHuile = v => { const k = nh(v); if (!k) return ""; return huilesList().find(h => nh(h) === k) || huilesList().find(h => nh(h).replace(/^la3/, "") === k.replace(/^la3/, "")) || null; };
-const matchAtelier = v => { const k = nh(v), L = S.params.ateliers || ["ATELIER FIXE", "ATELIER MOBILE"]; if (!k) return ""; return L.find(a => nh(a) === k) || L.find(a => nh(a).includes(k) || k.includes(nh(a).replace(/^atelier/, ""))) || null; };
+const matchAtelier = v => { const k = nh(v), L = S.params.ateliers || ["ATELIER FIXE", "ATELIER MOBILE G", "ATELIER MOBILE S"]; if (!k) return ""; return L.find(a => nh(a) === k) || L.find(a => nh(a).includes(k) || k.includes(nh(a).replace(/^atelier/, ""))) || null; };
 const matchEntretien = v => { const k = nh(v); if (!k) return ""; if (k.startsWith("vid")) return "Vidange"; if (k.startsWith("fui")) return "Fuite"; if (k.includes("niveau") || k.startsWith("appoint") || k.startsWith("remise")) return "Remise à niveau"; return null; };
 function buildOilRow(kind, g) {
   const errs = [], warns = [], dt = pDate(g("date")); if (dt.err) errs.push(dt.err); if (dt.warn) warns.push(dt.warn);
@@ -1283,7 +1283,7 @@ document.addEventListener("click", e => { const b = e.target.closest("[data-htab
 
 /* ---------- formulaires huiles ---------- */
 const huileSel = (id, v) => '<select id="' + id + '">' + huilesList().map(x => "<option" + (x === v ? " selected" : "") + ">" + esc(x) + "</option>").join("") + "</select>";
-const atelierSel = (id, v) => '<select id="' + id + '">' + (S.params.ateliers || ["ATELIER FIXE", "ATELIER MOBILE"]).map(x => "<option" + (x === v ? " selected" : "") + ">" + esc(x) + "</option>").join("") + "</select>";
+const atelierSel = (id, v) => { const L = (S.params.ateliers || ["ATELIER FIXE", "ATELIER MOBILE G", "ATELIER MOBILE S"]).slice(); if (v && !L.includes(v)) L.push(v); return '<select id="' + id + '">' + L.map(x => "<option" + (x === v ? " selected" : "") + ">" + esc(x) + "</option>").join("") + "</select>"; };
 async function hSave(table, map, store, d, row, label) {
   if (!d.id) { const r = await must(sb.from(table).insert(row).select().single()); store.set(r.id, map(r)); toast(label + " enregistré(e)."); }
   else { const r = await must(sb.from(table).update(row).eq("id", d.id).select()); if (!r.length) return "Modification refusée : vos droits ne le permettent pas."; store.set(r[0].id, map(r[0])); toast(label + " modifié(e)."); }
