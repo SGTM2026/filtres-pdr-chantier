@@ -180,3 +180,4 @@ tr.row-err td{background:var(--crit-soft)}
 @media (max-width:640px){.hb{grid-template-columns:1fr auto}.hb-t{grid-column:1/-1;order:3}}
 .bc-head{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
 .bc-go{white-space:nowrap}
+.fbar{display:inline-block;width:70px;height:9px;border-radius:5px;background:var(--surface2);border:1px solid var(--line);vertical-align:middle;overflow:hidden}.fbar i{display:block;height:100%}
