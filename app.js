@@ -1337,12 +1337,30 @@ function hAlimBody() {
     table([].concat(S.f.hAt ? [] : [{ h: "Atelier", f: u => "<b>" + esc(u.atelier) + "</b>" }], [{ h: "Huile", f: u => "<b>" + esc(u.huile) + "</b>" }, { h: "Mis en service", f: u => fD(u.date) },
       { h: "Consommé", n: 1, f: u => L_(u.cons) }, { h: "Reste", n: 1, f: u => "<b>" + L_(u.reste) + "</b>" }, { h: "Niveau", f: u => hBar(u.pct) },
       { h: "Engins servis", n: 1, f: u => '<span title="' + esc([...u.engins].join(", ")) + '">' + nb(u.engins.size) + "</span>" },
-      { h: "Moyenne / jour", n: 1, f: u => u.grp.moyJ ? L_(u.grp.moyJ) : '<span class="muted">–</span>' }, { h: "Durée moy. d'un fût", n: 1, f: u => u.grp.dureeMoy === null ? '<span class="muted">–</span>' : nb(Math.round(u.grp.dureeMoy)) + " j" },
-      { h: "", f: u => u.src.depart ? '<div class="rowact"><button class="btn small" data-act="h-edit" data-k="dep" data-id="' + u.src.id + '">Modifier</button><button class="btn small danger" data-act="h-del" data-k="dep" data-id="' + u.src.id + '">Suppr.</button></div>' : "" }]),
+      { h: "Moyenne / jour", n: 1, f: u => u.grp.moyJ ? L_(u.grp.moyJ) : '<span class="muted">–</span>' }, { h: "Durée moy. d'un fût", n: 1, f: u => u.grp.dureeMoy === null ? '<span class="muted">–</span>' : nb(Math.round(u.grp.dureeMoy)) + " j" }]),
       U.slice().sort((a, b) => a.atelier.localeCompare(b.atelier) || a.huile.localeCompare(b.huile) || (a.date || "").localeCompare(b.date || "")), { empty: "Aucun fût en cours" + (S.f.hAt ? " à l'" + S.f.hAt.toLowerCase() : "") + (S.f.hVides ? "" : " (cochez « Afficher les fûts vides » pour l'historique)") + "." }) + "</div>";
+  h += hDepartPanel(futs);
   h += hEnginConsoPanel();
   return h + '<p class="hint">La consommation de chaque atelier est imputée aux fûts dans l\'ordre de mise en service : les fûts déjà ouverts d\'abord, puis les bons de sortie par date. Niveau = reste ÷ contenance du fût. Un fût est vide quand il reste moins de 0,5 L. Les fûts déjà ouverts ne sont pas comptés dans le stock magasin. Moyenne / jour = consommation de cette huile dans l\'atelier sur les 30 derniers jours ÷ 30. Durée moy. d\'un fût = nombre de jours moyen entre la mise en service et la dernière consommation des fûts vidés. Autonomie = litres restants ÷ moyenne / jour.</p>';
 }
+/* stock de départ : fûts déjà entamés en atelier au démarrage, valeurs modifiables */
+function hDepartPanel(futs) {
+  const D = futs.filter(u => u.src.depart && (!S.f.hAt || u.atelier === S.f.hAt) && (!S.f.hHuile || u.huile === S.f.hHuile))
+    .sort((a, b) => a.atelier.localeCompare(b.atelier) || a.huile.localeCompare(b.huile) || a.src.id - b.src.id);
+  const tot = D.reduce((t, u) => t + u.cap, 0);
+  return '<div class="panel"><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px"><h3 style="margin:0">Stock de départ – fûts entamés <small>' + D.length + " fût(s) · " + L_(tot) + " au départ" + (S.f.hAt ? " · " + esc(S.f.hAt) : "") + '</small></h3><span class="grow"></span><button class="btn small primary" data-act="h-new-dep">+ Fût déjà ouvert</button></div>' +
+    table([{ h: "Atelier", f: u => "<b>" + esc(u.atelier) + "</b>" }, { h: "Huile", f: u => "<b>" + esc(u.huile) + "</b>" }, { h: "Date de saisie", f: u => fD(u.date) },
+      { h: "Contenance (L)", n: 1, f: u => '<input class="dep-cont" data-id="' + u.src.id + '" type="number" min="1" step="any" value="' + esc(u.src.cont) + '" style="width:85px;text-align:right">' },
+      { h: "Quantité au départ (L)", n: 1, f: u => '<input class="dep-l" data-id="' + u.src.id + '" type="number" min="0" step="any" value="' + esc(u.src.litres) + '" style="width:95px;text-align:right">' },
+      { h: "Consommé depuis", n: 1, f: u => L_(u.cons) }, { h: "Reste actuel", n: 1, f: u => "<b>" + L_(u.reste) + "</b>" },
+      { h: "", f: u => '<div class="rowact"><button class="btn small primary" data-act="dep-save" data-id="' + u.src.id + '">Enregistrer</button><button class="btn small" data-act="h-edit" data-k="dep" data-id="' + u.src.id + '">Modifier</button><button class="btn small danger" data-act="h-del" data-k="dep" data-id="' + u.src.id + '">Suppr.</button></div>' }],
+      D, { empty: "Aucun fût entamé saisi au départ." }) + '<p class="hint">Corrigez la contenance ou la quantité au départ puis cliquez « Enregistrer » ; « Modifier » permet aussi de changer l\'atelier, l\'huile ou la date. Le reste et le niveau sont recalculés aussitôt.</p></div>';
+}
+async function depSave(id) { const s0 = S.hSor.get(id); if (!s0) return;
+  const c = +String($('.dep-cont[data-id="' + id + '"]').value).replace(",", "."), l = +String($('.dep-l[data-id="' + id + '"]').value).replace(",", ".");
+  if (!(c > 0)) { toast("Contenance invalide."); return; } if (!(l > 0)) { toast("Quantité au départ invalide."); return; } if (l > c) { toast("La quantité au départ dépasse la contenance du fût."); return; }
+  const r = await must(sb.from("huile_sorties").update({ contenance: c, litres: l }).eq("id", id).select()); if (!r.length) { toast("Modification refusée."); return; }
+  S.hSor.set(id, mapHS(r[0])); schedule(); toast("Fût " + s0.huile + " (" + s0.atelier + ") : " + nb(l) + " L sur " + nb(c) + " L enregistrés."); }
 /* consommation d'un engin : totaux par huile, nombre d'interventions par type, historique */
 function hEnginConsoPanel() {
   const all = [...S.hCon.values()], codes = [...new Set(all.map(c => c.engin).filter(Boolean))].sort((a, b) => a.localeCompare(b, "fr", { numeric: true }));
@@ -1426,6 +1444,7 @@ document.addEventListener("click", async e => { const b = e.target.closest("[dat
     if (a === "h-new-sor") return hSorForm(null);
     if (a === "h-new-con") return hConForm(null);
     if (a === "h-new-dep") return S.isAdmin && hDepForm(null);
+    if (a === "dep-save") return S.isAdmin && await depSave(+id);
     if (a === "h-xls") return hExport(b.dataset.k);
     if (a === "h-rap-pdf") { toast("Préparation du rapport PDF…"); return await hReportPdf(); }
     if (a === "h-rap-xls") return await hReportXls();
