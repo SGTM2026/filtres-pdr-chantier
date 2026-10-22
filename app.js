@@ -327,6 +327,7 @@ VIEWS.params = { title: "Paramètres", body() { const P = S.params, ro = S.isAdm
   return '<div class="panel"><div class="fgrid">' + '<div class="field full"><label for="pa-nom">Nom du chantier</label><input id="pa-nom" value="' + esc(P.nom_chantier) + '"' + ro + "></div>" + lst("types", "Types de filtre") + lst("huiles", "Types d'huile") + lst("interventions", "Types d'intervention") + lst("ateliers", "Ateliers") + lst("unites", "Unités compteur") +
     '<div class="field"><label for="pa-seuil">Seuil d\'alerte par défaut – filtres</label><input id="pa-seuil" type="number" min="0" step="1" value="' + esc(P.seuil ?? 1) + '"' + ro + "></div>" +
     '<div class="field"><label for="pa-seuilh">Seuil d\'alerte huiles (fûts)</label><input id="pa-seuilh" type="number" min="0" step="1" value="' + esc(P.seuil_huile ?? 4) + '"' + ro + "></div>" +
+    '<div class="field"><label for="pa-seuilsh">Seuils d\'alerte par huile (un par ligne : Huile = fûts)</label><textarea id="pa-seuilsh" rows="4"' + ro + ">" + esc(Object.entries(P.seuils_huile || {}).map(([k, v]) => k + " = " + v).join("\n")) + '</textarea><div class="hint">Les huiles absentes de la liste utilisent le seuil général.</div></div>' +
     '<div class="hint full">Une ligne de filtre passe en ALERTE quand stock ≤ seuil, sauf seuil propre saisi dans le stock de départ. Les PDR n\'ont pas de seuil : RUPTURE quand stock ≤ 0, sinon OK.</div></div>' +
     (S.isAdmin ? '<div class="actions"><button class="btn primary" data-act="save-params">Enregistrer les paramètres</button></div>' : '<p class="hint">Modification réservée aux administrateurs.</p>') + "</div>"; } };
 
@@ -1073,8 +1074,11 @@ function hCompute() {
   for (const o of H.values()) { o.futsMag = o.futsIn - o.futsOut; o.litMag = o.litIn - o.litOut; o.reste = [...o.at.values()].reduce((t, a) => t + a.recu, 0) - o.conso; }
   return H;
 }
-const hSeuil = () => N(S.params.seuil_huile ?? 4) || 4;
-const hStatut = o => o.futsMag <= 0 ? "RUPTURE" : (o.futsMag <= hSeuil() ? "ALERTE" : "OK");
+const hSeuilG = () => N(S.params.seuil_huile ?? 4) || 4;
+const hSeuils = () => S.params.seuils_huile && typeof S.params.seuils_huile === "object" ? S.params.seuils_huile : {};
+const hSeuil = h => { const v = h != null ? hSeuils()[h] : undefined; return v != null && v !== "" ? N(v) : hSeuilG(); };   // seuil propre à l'huile, sinon seuil général
+const hSeuilTxt = () => nb(hSeuilG()) + " fûts" + (Object.keys(hSeuils()).length ? " (" + Object.entries(hSeuils()).map(([k, v]) => k + " : " + nb(v)).join(", ") + ")" : "");
+const hStatut = o => o.futsMag <= 0 ? "RUPTURE" : (o.futsMag <= hSeuil(o.huile) ? "ALERTE" : "OK");
 /* période du tableau de bord : préréglages + dates libres */
 const H_PER = [["mois", "Ce mois"], ["moisprec", "Mois précédent"], ["3mois", "3 derniers mois"], ["annee", "Cette année"], ["tout", "Tout l'historique"], ["perso", "Personnalisée"]];
 const hFilterPeriod = () => { const p = S.f.hPer || "annee", t = today(), d = new Date();
@@ -1121,7 +1125,7 @@ VIEWS.hdash = { title: "Gestion huiles – tableau de bord",
     $("#hd-du").onchange = dates; $("#hd-au").onchange = dates; $("#hd-h").onchange = e => { S.f.hHuile = e.target.value; render(); }; },
   body() { if (!S.isAdmin) return '<div class="empty">Réservé aux administrateurs.</div>';
     const [f, to] = hFilterPeriod(), D = hDashData(f, to, S.f.hHuile), nAl = D.alertes.length;
-    let h = '<div class="more">Période : <b>' + esc(hPerLabel(f, to)) + "</b>" + (D.hu ? " · huile : <b>" + esc(D.hu) + "</b>" : "") + " · seuil d'alerte stock : " + nb(hSeuil()) + " fûts</div>";
+    let h = '<div class="more">Période : <b>' + esc(hPerLabel(f, to)) + "</b>" + (D.hu ? " · huile : <b>" + esc(D.hu) + "</b>" : "") + " · seuil d'alerte stock : " + esc(hSeuilTxt()) + "</div>";
     h += '<div class="kpis">' + kpi("Litres consommés", esc(nb(Math.round(D.tot)))) + kpi("Interventions", nb(D.cons.length)) + kpi("Engins servis", nb(D.engins)) + kpi("Fûts reçus (BL)", nb(D.futsRecus)) +
       kpi("Fûts sortis vers ateliers", nb(D.futsSortis)) + kpi("Huiles en alerte / rupture", nb(nAl), nAl ? "crit" : "") + "</div>";
     if (nAl) h += '<div class="banner crit">⚠ Stock à réapprovisionner : ' + D.alertes.map(o => esc(o.huile) + " (" + nb(o.futsMag) + " fût" + (Math.abs(o.futsMag) > 1 ? "s" : "") + ")").join(" · ") + "</div>";
@@ -1178,7 +1182,7 @@ async function hReportPdf() {
   tbl(["Code", "Engin", "Fuites", "Litres (toutes interventions)", "Dernière intervention"], D.fuites.length ? D.fuites.map(o => [o.engin, C.label(o.engin), pnb(o.fuites), pnb(Math.round(o.v)) + " L", fD(o.last)]) : [["", "Aucune fuite répétée sur la période", "", "", ""]], { columnStyles: { 2: { halign: "right", fontStyle: "bold", textColor: [184, 50, 42] }, 3: { halign: "right" } } });
   // 6. stock et mouvements
   section("6. Stock magasin (état actuel) et mouvements de la période");
-  tbl(["Huile", "Fûts en stock", "Litres en stock", "Statut (seuil " + pnb(hSeuil()) + " fûts)", "Fûts reçus", "Fûts sortis", "Litres consommés"], D.Hs.map(o => { const m = D.mvt.find(x => x.huile === o.huile) || {}; return [o.huile, pnb(o.futsMag), pnb(Math.round(o.litMag)) + " L", hStatut(o), pnb(m.recus || 0), pnb(m.sortis || 0), pnb(Math.round(m.litres || 0)) + " L"]; }),
+  tbl(["Huile", "Fûts en stock", "Litres en stock", "Statut", "Fûts reçus", "Fûts sortis", "Litres consommés"], D.Hs.map(o => { const m = D.mvt.find(x => x.huile === o.huile) || {}; return [o.huile, pnb(o.futsMag), pnb(Math.round(o.litMag)) + " L", hStatut(o), pnb(m.recus || 0), pnb(m.sortis || 0), pnb(Math.round(m.litres || 0)) + " L"]; }),
     { columnStyles: { 1: { halign: "right", fontStyle: "bold" }, 2: { halign: "right" }, 4: { halign: "right" }, 5: { halign: "right" }, 6: { halign: "right" } }, didParseCell: d => { if (d.section === "body" && d.column.index === 3) { const v = d.cell.raw; d.cell.styles.fontStyle = "bold"; d.cell.styles.textColor = v === "RUPTURE" ? [184, 50, 42] : v === "ALERTE" ? [176, 110, 0] : [44, 122, 75]; } } });
   // 7. contrôle
   section("7. Contrôle magasin / atelier");
@@ -1215,7 +1219,7 @@ async function hReportXls() {
   if (D.monthly.length) ws.addConditionalFormatting({ ref: "C" + r4 + ":C" + (r - 1), rules: [{ type: "dataBar", cfvo: [{ type: "min" }, { type: "max" }], color: { argb: "FF9CC9D3" }, gradient: false }] }); r++;
   sec(ws, r++, "5. Fuites répétées (2 fuites ou plus)", 7); hdr(ws, r++, ["Code engin", "Engin", "Fuites", "Litres", "Dernière"]);
   if (D.fuites.length) D.fuites.forEach(o => { put(ws, r, [o.engin, C.label(o.engin), o.fuites, o.v, isoToDate(o.last)], { 2: I, 3: L, 4: "dd/mm/yyyy" }); r++; }); else { put(ws, r, ["Aucune fuite répétée"]); r++; } r++;
-  sec(ws, r++, "6. Stock magasin (état actuel) – seuil d'alerte " + hSeuil() + " fûts", 7); hdr(ws, r++, ["Huile", "", "Fûts en stock", "Litres en stock", "Statut", "Fûts reçus (période)", "Fûts sortis (période)"]); ws.mergeCells(r - 1, 1, r - 1, 2);
+  sec(ws, r++, "6. Stock magasin (état actuel) – seuil d'alerte " + hSeuilTxt().replace(/[\u202f\u00a0]/g, " "), 7); hdr(ws, r++, ["Huile", "", "Fûts en stock", "Litres en stock", "Statut", "Fûts reçus (période)", "Fûts sortis (période)"]); ws.mergeCells(r - 1, 1, r - 1, 2);
   D.Hs.forEach(o => { const m = D.mvt.find(x => x.huile === o.huile) || {}, st = hStatut(o); put(ws, r, [o.huile, "", o.futsMag, o.litMag, st, m.recus || 0, m.sortis || 0], { 2: I, 3: L, 5: I, 6: I }); ws.mergeCells(r, 1, r, 2);
     const c = ws.getCell(r, 5); c.alignment = { horizontal: "center" }; c.font = { name: "Arial", bold: true, color: { argb: st === "RUPTURE" ? "FFB8322A" : st === "ALERTE" ? "FFB06E00" : "FF2C7A4B" } }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: st === "RUPTURE" ? "FFFBE3E1" : st === "ALERTE" ? "FFFFF1D6" : "FFE3F2E8" } }; r++; }); r++;
   sec(ws, r++, "7. Contrôle magasin / atelier", 7); hdr(ws, r++, ["Atelier", "Huile", "Écart (L)"]);
@@ -1268,7 +1272,7 @@ VIEWS.huiles = { title: () => "Suivi huiles – " + (H_TABS().find(t => t[0] ===
     const acts = (k, d) => (S.isAdmin || (S.canWrite && d.createdBy === S.uid)) ? '<div class="rowact"><button class="btn small" data-act="h-edit" data-k="' + k + '" data-id="' + d.id + '">Modifier</button><button class="btn small danger" data-act="h-del" data-k="' + k + '" data-id="' + d.id + '">Suppr.</button></div>' : "";
     if (t === "stock") { const rows = [...H.values()];
       let h = '<div class="panel"><h3>Stock magasin <small>par type d\'huile</small></h3>' + table([{ h: "Huile", f: o => "<b>" + esc(o.huile) + "</b>" }, { h: "Stock de départ", n: 1, f: o => nb(o.futsDep) }, { h: "Fûts en stock", n: 1, f: o => '<b class="' + (hStatut(o) !== "OK" ? "reste" : "") + '">' + nb(o.futsMag) + "</b>" }, { h: "Litres en stock", n: 1, f: o => L_(o.litMag) },
-        { h: "Statut", f: o => pill(hStatut(o)) }], rows) + '<p class="hint">ALERTE quand il reste ' + nb(hSeuil()) + " fûts ou moins (seuil réglable dans Paramètres), RUPTURE à 0.</p></div>";
+        { h: "Statut", f: o => pill(hStatut(o)) }], rows) + '<p class="hint">ALERTE quand il reste ' + esc(hSeuilTxt()) + " ou moins (seuils réglables dans Paramètres), RUPTURE à 0.</p></div>";
       return h; }
     if (t === "alim") return S.isAdmin ? hAlimBody() : "";
     if (t === "ent") { const r = this.rows("ent"); return '<div class="more">' + r.length + " ligne(s) · " + nb(r.reduce((s, e) => s + N(e.bl), 0)) + " fût(s) livré(s). Seuls les fûts livrés (BL) entrent en stock.</div>" + table([{ h: "Date", f: e => fD(e.date) }, { h: "Huile", f: e => "<b>" + esc(e.huile) + "</b>" },
@@ -1455,7 +1459,7 @@ document.addEventListener("click", async e => { const b = e.target.closest("[dat
     if (a === "new-dep") return depForm(null);
     if (a === "edit-dep") return depForm(id);
     if (a === "del-dep") { const l = S.depart.get(+id); return l && confirmBox("Supprimer la ligne de stock de départ " + l.ref + " (" + (l.engin || "commun") + ", " + nb(l.qte) + ") ?", async () => { await must(sb.from("stock_depart").delete().eq("id", l.id)); S.depart.delete(l.id); schedule(); toast("Ligne supprimée."); }); }
-    if (a === "save-params") { const P = { nom_chantier: $("#pa-nom").value.trim() }; ["types", "huiles", "interventions", "ateliers", "unites"].forEach(k => P[k] = $("#pa-" + k).value.split("\n").map(s => s.trim()).filter(Boolean)); P.seuil = N($("#pa-seuil").value); P.seuil_huile = N($("#pa-seuilh").value);
+    if (a === "save-params") { const P = { nom_chantier: $("#pa-nom").value.trim() }; ["types", "huiles", "interventions", "ateliers", "unites"].forEach(k => P[k] = $("#pa-" + k).value.split("\n").map(s => s.trim()).filter(Boolean)); P.seuil = N($("#pa-seuil").value); P.seuil_huile = N($("#pa-seuilh").value); P.seuils_huile = {}; for (const ln of $("#pa-seuilsh").value.split("\n")) { const m = ln.match(/^(.+?)\s*[=:]\s*(\d+(?:[.,]\d+)?)\s*$/); if (m) P.seuils_huile[m[1].trim()] = +m[2].replace(",", "."); }
       const r = await must(sb.from("params").update(P).eq("id", 1).select().single()); S.params = Object.assign(S.params, r); schedule(true); applyHeader(); toast("Paramètres enregistrés."); return; }
     if (a === "seen") { await sb.rpc("set_last_seen"); S.lastSeen = new Date().toISOString(); render(); toast("Nouveautés marquées comme lues."); return; }
     if (a === "new-user") return userForm(null);
