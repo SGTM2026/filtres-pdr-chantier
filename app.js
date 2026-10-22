@@ -1280,7 +1280,7 @@ VIEWS.huiles = { title: () => "Suivi huiles – " + (H_TABS().find(t => t[0] ===
       { h: "Huile", f: c => "<b>" + esc(c.huile) + "</b>" }, { h: "Entretien", f: c => '<span class="pill ' + (c.entretien === "Fuite" ? "p-crit" : c.entretien === "Vidange" ? "p-info" : "p-warn") + '">' + esc(c.entretien) + "</span>" }, { h: "Qté", n: 1, f: c => "<b>" + L_(c.qte) + "</b>" },
       { h: "Atelier", f: c => esc(c.atelier) }, { h: "Compteur", n: 1, f: c => nb(c.compteur) }, { h: "Observations", f: c => esc(c.obs) }, { h: "Saisi par", f: c => who(c.createdBy) }, { h: "", f: c => acts("con", c) }], r, { empty: "Aucune consommation." }); }
     return ""; } };
-document.addEventListener("change", e => { if (e.target.id === "h-at") { S.f.hAt = e.target.value; render(); } });
+document.addEventListener("change", e => { if (e.target.id === "h-at") { S.f.hAt = e.target.value; render(); } if (e.target.id === "h-eng") { S.f.hEng = e.target.value; render(); } });
 document.addEventListener("click", e => { const b = e.target.closest("[data-htab]"); if (!b) return; S.f.hTab = b.dataset.htab; S.f.hQ = ""; render(true); });
 
 /* ---------- alimentation atelier : fûts sortis du magasin (ou déjà ouverts) et leur consommation, fût par fût ---------- */
@@ -1299,7 +1299,7 @@ function hFuts() {
     if (q > 1e-9) o.depasse += q; }
   const t = today(), d30 = ymd(new Date(Date.now() - 30 * 864e5)), futs = [];
   for (const o of G.values()) { o.reste = 0; o.actifs = 0; o.pleins = 0; o.vides = 0;
-    for (const u of o.futs) { u.grp = o; u.reste = Math.max(0, u.cap - u.cons); u.pct = u.cont ? Math.min(100, u.reste / u.cont * 100) : 0;  // niveau réel du fût : reste ÷ contenance u.statut = u.reste <= 0.5 ? "Vide" : (u.cons > 0 || u.src.depart ? "En cours" : "Plein (non entamé)");  // un fût déjà ouvert est entamé
+    for (const u of o.futs) { u.grp = o; u.reste = Math.max(0, u.cap - u.cons); u.pct = u.cont ? Math.min(100, u.reste / u.cont * 100) : 0; /* niveau réel : reste ÷ contenance */ u.statut = u.reste <= 0.5 ? "Vide" : (u.cons > 0 || u.src.depart ? "En cours" : "Plein (non entamé)"); /* un fût déjà ouvert est entamé */
       u.jours = daysBetween(u.date, u.statut === "Vide" ? (u.last || t) : t); o.reste += u.reste; if (u.statut === "Vide") o.vides++; else if (u.statut === "En cours") o.actifs++; else o.pleins++; futs.push(u); }
     o.c30 = o.cons.filter(c => (c.date || "") >= d30).reduce((s, c) => s + c.qte, 0); o.moyJ = o.c30 / 30; o.autonomie = o.moyJ > 0 ? o.reste / o.moyJ : null;
     const vid = o.futs.filter(u => u.statut === "Vide" && u.jours > 0); o.dureeMoy = vid.length ? vid.reduce((s, u) => s + u.jours, 0) / vid.length : null; }
@@ -1323,7 +1323,24 @@ function hAlimBody() {
       { h: "Moyenne / jour", n: 1, f: u => u.grp.moyJ ? L_(u.grp.moyJ) : '<span class="muted">–</span>' }, { h: "Durée moy. d'un fût", n: 1, f: u => u.grp.dureeMoy === null ? '<span class="muted">–</span>' : nb(Math.round(u.grp.dureeMoy)) + " j" },
       { h: "", f: u => u.src.depart ? '<div class="rowact"><button class="btn small" data-act="h-edit" data-k="dep" data-id="' + u.src.id + '">Modifier</button><button class="btn small danger" data-act="h-del" data-k="dep" data-id="' + u.src.id + '">Suppr.</button></div>' : "" }]),
       U.slice().sort((a, b) => a.atelier.localeCompare(b.atelier) || a.huile.localeCompare(b.huile) || (a.date || "").localeCompare(b.date || "")), { empty: "Aucun fût en cours" + (S.f.hAt ? " à l'" + S.f.hAt.toLowerCase() : "") + (S.f.hVides ? "" : " (cochez « Afficher les fûts vides » pour l'historique)") + "." }) + "</div>";
+  h += hEnginConsoPanel();
   return h + '<p class="hint">La consommation de chaque atelier est imputée aux fûts dans l\'ordre de mise en service : les fûts déjà ouverts d\'abord, puis les bons de sortie par date. Niveau = reste ÷ contenance du fût. Un fût est vide quand il reste moins de 0,5 L. Les fûts déjà ouverts ne sont pas comptés dans le stock magasin. Moyenne / jour = consommation de cette huile dans l\'atelier sur les 30 derniers jours ÷ 30. Durée moy. d\'un fût = nombre de jours moyen entre la mise en service et la dernière consommation des fûts vidés. Autonomie = litres restants ÷ moyenne / jour.</p>';
+}
+/* consommation d'un engin : totaux par huile, nombre d'interventions par type, historique */
+function hEnginConsoPanel() {
+  const all = [...S.hCon.values()], codes = [...new Set(all.map(c => c.engin).filter(Boolean))].sort((a, b) => a.localeCompare(b, "fr", { numeric: true }));
+  if (S.f.hEng && !codes.includes(S.f.hEng)) S.f.hEng = "";
+  const sel = '<select id="h-eng" style="width:auto;min-width:280px"><option value="">– choisir un engin –</option>' + codes.map(c => '<option value="' + esc(c) + '"' + (c === S.f.hEng ? " selected" : "") + ">" + esc(c + (C.label(c) ? " – " + C.label(c) : "")) + "</option>").join("") + "</select>";
+  let h = '<div class="panel"><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px"><h3 style="margin:0">Consommation par engin</h3><span class="grow"></span><label class="muted" for="h-eng" style="font-size:12px;text-transform:uppercase;letter-spacing:.05em">Engin</label>' + sel + "</div>";
+  if (!codes.length) return h + '<div class="empty">Aucune consommation saisie pour l\'instant.</div></div>';
+  if (!S.f.hEng) return h + '<div class="empty">Choisissez un engin pour voir sa consommation d\'huile et son historique.</div></div>';
+  const L = all.filter(c => c.engin === S.f.hEng).sort((a, b) => (b.date || "").localeCompare(a.date || "") || b.id - a.id), cnt = t => L.filter(c => c.entretien === t).length;
+  h += '<div class="kpis">' + kpi("Total consommé", L_(L.reduce((t, c) => t + c.qte, 0)), "txt") + kpi("Vidanges", nb(cnt("Vidange"))) + kpi("Fuites", nb(cnt("Fuite")), cnt("Fuite") ? "crit" : "") + kpi("Remises à niveau", nb(cnt("Remise à niveau"))) + kpi("Interventions", nb(L.length)) + "</div>";
+  const byH = [...new Set(L.map(c => c.huile))].map(hu => { const X = L.filter(c => c.huile === hu), n = t => X.filter(c => c.entretien === t).length; return { huile: hu, tot: X.reduce((t, c) => t + c.qte, 0), vid: n("Vidange"), fui: n("Fuite"), niv: n("Remise à niveau"), last: X[0].date }; }).sort((a, b) => b.tot - a.tot);
+  h += "<h4>Total par huile</h4>" + table([{ h: "Huile", f: o => "<b>" + esc(o.huile) + "</b>" }, { h: "Total consommé", n: 1, f: o => "<b>" + L_(o.tot) + "</b>" }, { h: "Vidange", n: 1, f: o => nb(o.vid) }, { h: "Fuite", n: 1, f: o => o.fui ? '<span class="reste">' + nb(o.fui) + "</span>" : "0" }, { h: "Remise à niveau", n: 1, f: o => nb(o.niv) }, { h: "Dernière conso", f: o => fD(o.last) }], byH);
+  h += "<h4>Historique de consommation</h4>" + table([{ h: "Date", f: c => fD(c.date) }, { h: "Huile", f: c => "<b>" + esc(c.huile) + "</b>" }, { h: "Entretien", f: c => '<span class="pill ' + (c.entretien === "Fuite" ? "p-crit" : c.entretien === "Vidange" ? "p-info" : "p-warn") + '">' + esc(c.entretien) + "</span>" },
+    { h: "Quantité", n: 1, f: c => "<b>" + L_(c.qte) + "</b>" }, { h: "Atelier", f: c => esc(c.atelier) || '<span class="muted">–</span>' }, { h: "Compteur", n: 1, f: c => nb(c.compteur) }, { h: "Observations", f: c => esc(c.obs) }, { h: "Saisi par", f: c => who(c.createdBy) }], L, { limit: 500 });
+  return h + "</div>";
 }
 function hDepForm(d) { const isNew = !d; d = d || { date: today(), huile: S.f.hHuile || huilesList()[0], atelier: S.f.hAt || (S.params.ateliers || [])[0], cont: 208, litres: "" };
   const ov = modal(isNew ? "Fût déjà ouvert en atelier" : "Modifier le fût ouvert", '<p class="muted" style="margin-top:0">Pour un fût déjà entamé avant l\'utilisation de l\'application. Il n\'est pas déduit du stock magasin ; la consommation des engins sera imputée sur ce fût en premier.</p><div class="fgrid">' +
