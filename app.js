@@ -204,6 +204,12 @@ function daNonTraitees(code) { const out = [];
   for (const l of S.daL.values()) { const d = S.da.get(l.da); if (!d || d.cloture) continue; if (String(l.engin || d.engin || "") !== code) continue;
     const cmd = commandeDal(l.id), reste = Math.max(0, N(l.qte) - cmd); if (reste > 0) out.push({ d, l, cmd, reste }); }
   return out.sort((a, b) => (b.d.date || "").localeCompare(a.d.date || "") || b.d.id - a.d.id || a.l.id - b.l.id); }
+/* dernière visite du site : enregistrée à l'ouverture puis toutes les 5 minutes tant que la page est affichée */
+let visitT = 0;
+function touchVisit() { if (!S.uid || Date.now() - visitT < 60e3) return; visitT = Date.now(); sb.rpc("touch_visit").then(() => {}, () => {}); }
+setInterval(() => { if (!document.hidden) { visitT = 0; touchVisit(); } }, 5 * 60e3);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) touchVisit(); });
+
 /* ---------- vues ---------- */
 const VIEWS = {};
 VIEWS.dash = { title: "Tableau de bord", body() {
@@ -351,7 +357,7 @@ VIEWS.users = { title: "Utilisateurs",
     return '<div class="panel"><h3>Rôles</h3><p class="muted" style="margin:0"><b>Administrateur</b> : tout (comptes, engins, stock de départ, paramètres, saisies de tous, demandes d\'achat) · <b>Gestionnaire</b> : crée les demandes d\'achat (DA) et consulte le stock · <b>Magasinier</b> : crée les DA, saisit le N° des DA, entrées et sorties · <b>Saisie</b> : entrées et sorties (filtres et PDR), modifie les siennes · <b>Consultation</b> : lecture seule (sans les DA).</p></div>' + table([
       { h: "Nom", f: p => who(p.id) }, { h: "Identifiant", f: p => mono(p.identifiant) }, { h: "Fonction", f: p => esc(p.fonction) }, { h: "Rôle", f: p => '<span class="role ' + (p.role === "admin" ? "admin" : "") + '">' + esc(ROLE_FR[p.role] || p.role) + "</span>" },
       { h: "État", f: p => p.actif ? '<span class="pill p-ok">Actif</span>' : '<span class="pill p-crit">Désactivé</span>' }, { h: "Actions (récentes)", n: 1, f: p => nb((act.get(p.id) || {}).n || 0) }, { h: "Dernière action", f: p => fDT((act.get(p.id) || {}).last) },
-      { h: "Dernière visite", f: p => fDT(p.last_seen) }, { h: "", f: p => '<div class="rowact"><button class="btn small" data-act="edit-user" data-id="' + esc(p.id) + '">Modifier</button><button class="btn small" data-act="pw-user" data-id="' + esc(p.id) + '">Mot de passe</button></div>' }], r, { empty: "Aucun compte." }); } };
+      { h: "Dernière visite", f: p => p.last_visit ? fDT(p.last_visit) + ((Date.now() - Date.parse(p.last_visit)) < 6 * 60e3 ? ' <span class="pill p-ok">en ligne</span>' : "") : '<span class="muted">jamais</span>' }, { h: "", f: p => '<div class="rowact"><button class="btn small" data-act="edit-user" data-id="' + esc(p.id) + '">Modifier</button><button class="btn small" data-act="pw-user" data-id="' + esc(p.id) + '">Mot de passe</button></div>' }], r, { empty: "Aucun compte." }); } };
 
 VIEWS.compte = { title: "Mon compte", body() { const m = S.me || {};
   return '<div class="grid2"><div class="panel"><h3>Mes informations</h3><p>' + who(S.uid) + "</p><p>Identifiant : " + mono(m.identifiant) + "<br>Rôle : <b>" + esc(ROLE_FR[m.role] || m.role) + "</b>" + (m.fonction ? "<br>Fonction : " + esc(m.fonction) : "") +
@@ -1544,7 +1550,7 @@ async function startApp() {
   await loadProfiles(); const me = S.me;
   if (!me || !me.actif) { await sb.auth.signOut(); showLogin("Ce compte n'est pas actif. Contactez l'administrateur."); return; }
   S.role = me.role; S.isAdmin = me.role === "admin"; S.canWrite = S.isAdmin || me.role === "saisie" || me.role === "magasinier";
-  S.canDA = ["admin", "gestionnaire", "magasinier", "saisie"].includes(me.role); S.canCreateDA = S.canDA; S.canNumDA = ["admin", "magasinier"].includes(me.role); S.lastSeen = me.last_seen || null;
+  S.canDA = ["admin", "gestionnaire", "magasinier", "saisie"].includes(me.role); S.canCreateDA = S.canDA; S.canNumDA = ["admin", "magasinier"].includes(me.role); S.lastSeen = me.last_seen || null; touchVisit();
   $("#me-box").innerHTML = '<span class="who">' + avatar(S.uid) + '<span class="nm">' + esc(me.nom || me.identifiant) + "</span></span>" + '<span class="role ' + (S.isAdmin ? "admin" : "") + '">' + esc(ROLE_FR[me.role]) + '</span><button class="btn small" data-act="logout">Déconnexion</button>';
   try { const v = localStorage.getItem("fc-view"); if (v && canSee(v)) S.view = v; else if (!S.isAdmin) S.view = "stock"; const c = localStorage.getItem("fc-cat"); if (c === "PDR" || c === "FILTRE") S.f.cat = c; } catch (_) {}
   const [eng, dep, ent, sor, par, jr] = await Promise.all([fetchAll("engins", "code"), fetchAll("stock_depart", "id"), fetchAll("entrees", "id"), fetchAll("sorties", "id"),
