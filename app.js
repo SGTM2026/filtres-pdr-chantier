@@ -1056,16 +1056,16 @@ function onDaChange(p) {
    ===================================================================== */
 const ENTRETIENS = ["Vidange", "Fuite", "Remise à niveau"];
 const huilesList = () => (S.params.huiles && S.params.huiles.length ? S.params.huiles : ["LA-3 15W40", "LA-3 10W", "AW68", "AW46", "ATF", "SAE 80W90", "Liquide antigel"]);
-const mapHE = r => ({ id: r.id, date: r.date, huile: r.huile, bc: r.futs_bc, bl: r.futs_bl, cont: N(r.contenance) || 208, numBc: r.num_bc || "", numBl: r.num_bl || "", fourn: r.fournisseur || "", obs: r.obs || "", createdBy: r.created_by });
+const mapHE = r => ({ id: r.id, date: r.date, huile: r.huile, bc: r.futs_bc, bl: r.futs_bl, cont: N(r.contenance) || 208, numBc: r.num_bc || "", numBl: r.num_bl || "", fourn: r.fournisseur || "", obs: r.obs || "", depart: r.source === "depart", createdBy: r.created_by });
 const mapHS = r => ({ id: r.id, date: r.date, huile: r.huile, atelier: r.atelier || "", futs: N(r.futs), cont: N(r.contenance) || 208, numBs: r.num_bs || "", obs: r.obs || "", createdBy: r.created_by });
 const mapHC = r => ({ id: r.id, date: r.date, engin: String(r.engin || ""), huile: r.huile, entretien: r.entretien, qte: N(r.qte), atelier: r.atelier || "", compteur: r.compteur, obs: r.obs || "", createdBy: r.created_by });
 const L_ = v => nb(Math.round(N(v) * 10) / 10) + " L";
 const lastCont = huile => { const e = [...S.hEnt.values()].filter(x => x.huile === huile).sort((a, b) => b.id - a.id)[0]; return e ? e.cont : 208; };
 
 function hCompute() {
-  const H = new Map(); const get = h => { if (!H.has(h)) H.set(h, { huile: h, futsIn: 0, litIn: 0, futsOut: 0, litOut: 0, futsAtt: 0, conso: 0, at: new Map(), lastIn: "", lastOut: "" }); return H.get(h); };
+  const H = new Map(); const get = h => { if (!H.has(h)) H.set(h, { huile: h, futsIn: 0, litIn: 0, futsOut: 0, litOut: 0, futsAtt: 0, futsDep: 0, conso: 0, at: new Map(), lastIn: "", lastOut: "" }); return H.get(h); };
   huilesList().forEach(get);
-  for (const e of S.hEnt.values()) { const o = get(e.huile), bl = N(e.bl); o.futsIn += bl; o.litIn += bl * e.cont; o.futsAtt += Math.max(0, N(e.bc) - bl); if (bl > 0 && (e.date || "") > o.lastIn) o.lastIn = e.date; }
+  for (const e of S.hEnt.values()) { const o = get(e.huile), bl = N(e.bl); o.futsIn += bl; o.litIn += bl * e.cont; o.futsAtt += Math.max(0, N(e.bc) - bl); if (e.depart) { o.futsDep += bl; continue; } if (bl > 0 && (e.date || "") > o.lastIn) o.lastIn = e.date; }
   const atOf = (o, a) => { a = a || "Non précisé"; if (!o.at.has(a)) o.at.set(a, { atelier: a, recu: 0, conso: 0, futs: 0 }); return o.at.get(a); };
   for (const s of S.hSor.values()) { const o = get(s.huile); o.futsOut += s.futs; o.litOut += s.futs * s.cont; if ((s.date || "") > o.lastOut) o.lastOut = s.date; const a = atOf(o, s.atelier); a.recu += s.futs * s.cont; a.futs += s.futs; }
   for (const c of S.hCon.values()) { const o = get(c.huile); o.conso += c.qte; atOf(o, c.atelier).conso += c.qte; }
@@ -1089,7 +1089,7 @@ const MOIS_LONG = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juill
 function hDashData(f, to, hu) {
   const inP = d => inPeriod(d, f, to), H = hCompute();
   const cons = [...S.hCon.values()].filter(c => inP(c.date) && (!hu || c.huile === hu)), sors = [...S.hSor.values()].filter(s => inP(s.date) && (!hu || s.huile === hu));
-  const ents = [...S.hEnt.values()].filter(e => inP(e.date) && (!hu || e.huile === hu));
+  const ents = [...S.hEnt.values()].filter(e => !e.depart && inP(e.date) && (!hu || e.huile === hu));
   const Hs = [...H.values()].filter(o => !hu || o.huile === hu);
   const tot = cons.reduce((s, c) => s + c.qte, 0);
   const byH = huilesList().filter(x => !hu || x === hu).map(x => { const L = cons.filter(c => c.huile === x); return { huile: x, v: L.reduce((s, c) => s + c.qte, 0), n: L.length }; }).filter(r => r.v > 0).sort((a, b) => b.v - a.v);
@@ -1257,13 +1257,13 @@ VIEWS.huiles = { title: () => "Suivi huiles – " + (H_TABS().find(t => t[0] ===
     const q = $("#h-q"); if (q) q.oninput = e => { S.f.hQ = e.target.value; render(); };
     ["h-f", "h-t"].forEach(id => { const el = $("#" + id); if (el) el.onchange = () => { S.f.hFrom = $("#h-f").value; S.f.hTo = $("#h-t").value; render(); }; }); },
   rows(k) { const q = norm(S.f.hQ), hu = S.f.hHuile;
-    if (k === "ent") return [...S.hEnt.values()].filter(e => (!hu || e.huile === hu) && (!q || norm([e.numBc, e.numBl, e.fourn, e.obs, e.huile].join(" ")).includes(q))).sort((a, b) => (b.date || "").localeCompare(a.date || "") || b.id - a.id);
+    if (k === "ent") return [...S.hEnt.values()].filter(e => !e.depart && (!hu || e.huile === hu) && (!q || norm([e.numBc, e.numBl, e.fourn, e.obs, e.huile].join(" ")).includes(q))).sort((a, b) => (b.date || "").localeCompare(a.date || "") || b.id - a.id);
     if (k === "sor") return [...S.hSor.values()].filter(s => (!hu || s.huile === hu) && (!q || norm([s.numBs, s.atelier, s.obs, s.huile].join(" ")).includes(q))).sort((a, b) => (b.date || "").localeCompare(a.date || "") || b.id - a.id);
     return [...S.hCon.values()].filter(c => (!hu || c.huile === hu) && inPeriod(c.date, S.f.hFrom, S.f.hTo) && (!q || norm([c.engin, C.label(c.engin), c.entretien, c.atelier, c.obs, c.huile].join(" ")).includes(q))).sort((a, b) => (b.date || "").localeCompare(a.date || "") || b.id - a.id); },
   body() { const t = hTab(), H = hCompute();
     const acts = (k, d) => (S.isAdmin || (S.canWrite && d.createdBy === S.uid)) ? '<div class="rowact"><button class="btn small" data-act="h-edit" data-k="' + k + '" data-id="' + d.id + '">Modifier</button><button class="btn small danger" data-act="h-del" data-k="' + k + '" data-id="' + d.id + '">Suppr.</button></div>' : "";
     if (t === "stock") { const rows = [...H.values()];
-      let h = '<div class="panel"><h3>Stock magasin <small>par type d\'huile</small></h3>' + table([{ h: "Huile", f: o => "<b>" + esc(o.huile) + "</b>" }, { h: "Fûts en stock", n: 1, f: o => '<b class="' + (hStatut(o) !== "OK" ? "reste" : "") + '">' + nb(o.futsMag) + "</b>" }, { h: "Litres en stock", n: 1, f: o => L_(o.litMag) },
+      let h = '<div class="panel"><h3>Stock magasin <small>par type d\'huile</small></h3>' + table([{ h: "Huile", f: o => "<b>" + esc(o.huile) + "</b>" }, { h: "Stock de départ", n: 1, f: o => nb(o.futsDep) }, { h: "Fûts en stock", n: 1, f: o => '<b class="' + (hStatut(o) !== "OK" ? "reste" : "") + '">' + nb(o.futsMag) + "</b>" }, { h: "Litres en stock", n: 1, f: o => L_(o.litMag) },
         { h: "Statut", f: o => pill(hStatut(o)) }], rows) + '<p class="hint">ALERTE quand il reste ' + nb(hSeuil()) + " fûts ou moins (seuil réglable dans Paramètres), RUPTURE à 0.</p></div>";
       const at = rows.flatMap(o => [...o.at.values()].map(a => Object.assign({ huile: o.huile }, a, { reste: a.recu - a.conso })));
       h += '<div class="panel"><h3>Huile en atelier <small>litres reçus par bons de sortie − litres consommés</small></h3>' + table([{ h: "Atelier", f: a => esc(a.atelier) }, { h: "Huile", f: a => esc(a.huile) }, { h: "Fûts reçus", n: 1, f: a => nb(a.futs) }, { h: "Reçu", n: 1, f: a => L_(a.recu) }, { h: "Consommé", n: 1, f: a => L_(a.conso) },
