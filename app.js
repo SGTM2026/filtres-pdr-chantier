@@ -1302,7 +1302,7 @@ function hFuts() {
     if (q > 1e-9) o.depasse += q; }
   const t = today(), d30 = ymd(new Date(Date.now() - 30 * 864e5)), futs = [];
   for (const o of G.values()) { o.reste = 0; o.actifs = 0; o.pleins = 0; o.vides = 0;
-    for (const u of o.futs) { u.reste = Math.max(0, u.cap - u.cons); u.pct = u.cap ? u.reste / u.cap * 100 : 0; u.statut = u.reste <= 0.5 ? "Vide" : (u.cons > 0 ? "En cours" : "Plein (non entamé)");
+    for (const u of o.futs) { u.reste = Math.max(0, u.cap - u.cons); u.pct = u.cap ? u.reste / u.cap * 100 : 0; u.statut = u.reste <= 0.5 ? "Vide" : (u.cons > 0 || u.src.depart ? "En cours" : "Plein (non entamé)");  // un fût déjà ouvert est entamé
       u.jours = daysBetween(u.date, u.statut === "Vide" ? (u.last || t) : t); o.reste += u.reste; if (u.statut === "Vide") o.vides++; else if (u.statut === "En cours") o.actifs++; else o.pleins++; futs.push(u); }
     o.c30 = o.cons.filter(c => (c.date || "") >= d30).reduce((s, c) => s + c.qte, 0); o.moyJ = o.c30 / 30; o.autonomie = o.moyJ > 0 ? o.reste / o.moyJ : null;
     const vid = o.futs.filter(u => u.statut === "Vide" && u.jours > 0); o.dureeMoy = vid.length ? vid.reduce((s, u) => s + u.jours, 0) / vid.length : null; }
