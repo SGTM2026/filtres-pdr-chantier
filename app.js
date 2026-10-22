@@ -1294,7 +1294,7 @@ function hFuts() {
   const G = new Map(), g = (at, h) => { const k = at + "|" + h; if (!G.has(k)) G.set(k, { atelier: at, huile: h, futs: [], depasse: 0, cons: [] }); return G.get(k); };
   const sors = [...S.hSor.values()].sort((a, b) => (b.depart - a.depart) || (a.date || "").localeCompare(b.date || "") || a.id - b.id);
   for (const s of sors) { const o = g(s.atelier || "Non précisé", s.huile), cap1 = s.depart ? s.litres : s.cont; let n = s.futs, i = 0;
-    while (n > 1e-9) { const part = Math.min(1, n); i++; o.futs.push({ src: s, atelier: o.atelier, huile: o.huile, date: s.date, cap: cap1 * part, cons: 0, engins: new Set(), n: 0, last: "",
+    while (n > 1e-9) { const part = Math.min(1, n); i++; o.futs.push({ src: s, atelier: o.atelier, huile: o.huile, date: s.date, cap: cap1 * part, cont: s.cont * part, cons: 0, engins: new Set(), n: 0, last: "",
       label: s.depart ? "Fût ouvert (avant l'application)" : "BS " + (s.numBs || "#" + s.id) + (s.futs > 1 ? " · fût " + i + "/" + Math.ceil(s.futs) : "") }); n -= part; } }
   const cons = [...S.hCon.values()].sort((a, b) => (a.date || "").localeCompare(b.date || "") || a.id - b.id);
   for (const c of cons) { const o = g(c.atelier || "Non précisé", c.huile); o.cons.push(c); let q = c.qte;
@@ -1302,7 +1302,7 @@ function hFuts() {
     if (q > 1e-9) o.depasse += q; }
   const t = today(), d30 = ymd(new Date(Date.now() - 30 * 864e5)), futs = [];
   for (const o of G.values()) { o.reste = 0; o.actifs = 0; o.pleins = 0; o.vides = 0;
-    for (const u of o.futs) { u.reste = Math.max(0, u.cap - u.cons); u.pct = u.cap ? u.reste / u.cap * 100 : 0; u.statut = u.reste <= 0.5 ? "Vide" : (u.cons > 0 || u.src.depart ? "En cours" : "Plein (non entamé)");  // un fût déjà ouvert est entamé
+    for (const u of o.futs) { u.reste = Math.max(0, u.cap - u.cons); u.pct = u.cont ? Math.min(100, u.reste / u.cont * 100) : 0;  // niveau réel du fût : reste ÷ contenance u.statut = u.reste <= 0.5 ? "Vide" : (u.cons > 0 || u.src.depart ? "En cours" : "Plein (non entamé)");  // un fût déjà ouvert est entamé
       u.jours = daysBetween(u.date, u.statut === "Vide" ? (u.last || t) : t); o.reste += u.reste; if (u.statut === "Vide") o.vides++; else if (u.statut === "En cours") o.actifs++; else o.pleins++; futs.push(u); }
     o.c30 = o.cons.filter(c => (c.date || "") >= d30).reduce((s, c) => s + c.qte, 0); o.moyJ = o.c30 / 30; o.autonomie = o.moyJ > 0 ? o.reste / o.moyJ : null;
     const vid = o.futs.filter(u => u.statut === "Vide" && u.jours > 0); o.dureeMoy = vid.length ? vid.reduce((s, u) => s + u.jours, 0) / vid.length : null; }
@@ -1324,12 +1324,12 @@ function hAlimBody() {
   const ats = [...new Set(U.map(u => u.atelier))].sort();
   for (const at of ats) { const L = U.filter(u => u.atelier === at);
     h += '<div class="panel"><h3>' + esc(at) + " <small>" + L.length + " fût(s) · " + L_(L.reduce((t, u) => t + u.reste, 0)) + " restant(s)</small></h3>" + table([{ h: "Huile", f: u => "<b>" + esc(u.huile) + "</b>" }, { h: "Fût", f: u => esc(u.label) }, { h: "Mis en service", f: u => fD(u.date) },
-      { h: "Litres au départ", n: 1, f: u => L_(u.cap) }, { h: "Consommé", n: 1, f: u => L_(u.cons) }, { h: "Reste", n: 1, f: u => "<b>" + L_(u.reste) + "</b>" }, { h: "Niveau", f: u => hBar(u.pct) },
+      { h: "Contenance", n: 1, f: u => L_(u.cont) }, { h: "Quantité au départ", n: 1, f: u => L_(u.cap) }, { h: "Consommé", n: 1, f: u => L_(u.cons) }, { h: "Reste", n: 1, f: u => "<b>" + L_(u.reste) + "</b>" }, { h: "Niveau", f: u => hBar(u.pct) },
       { h: "Statut", f: u => '<span class="pill ' + (u.statut === "Vide" ? "p-info" : u.statut === "En cours" ? "p-acc" : "p-ok") + '">' + u.statut + "</span>" }, { h: "Engins servis", n: 1, f: u => '<span title="' + esc([...u.engins].join(", ")) + '">' + nb(u.engins.size) + "</span>" },
       { h: "Dern. conso", f: u => fD(u.last) }, { h: "Durée", n: 1, f: u => nb(u.jours) + " j" },
       { h: "", f: u => u.src.depart ? '<div class="rowact"><button class="btn small" data-act="h-edit" data-k="dep" data-id="' + u.src.id + '">Modifier</button><button class="btn small danger" data-act="h-del" data-k="dep" data-id="' + u.src.id + '">Suppr.</button></div>' : "" }], L) + "</div>"; }
   if (!ats.length && Gs.length) h += '<div class="empty">Aucun fût en cours' + (S.f.hVides ? "" : " (cochez « Afficher les fûts vides » pour l'historique)") + ".</div>";
-  return h + '<p class="hint">La consommation de chaque atelier est imputée aux fûts dans l\'ordre de mise en service : les fûts déjà ouverts d\'abord, puis les bons de sortie par date. Un fût est vide quand il reste moins de 0,5 L. Les fûts déjà ouverts ne sont pas comptés dans le stock magasin. Autonomie = litres restants ÷ consommation moyenne des 30 derniers jours.</p>';
+  return h + '<p class="hint">La consommation de chaque atelier est imputée aux fûts dans l\'ordre de mise en service : les fûts déjà ouverts d\'abord, puis les bons de sortie par date. Niveau = reste ÷ contenance du fût. Un fût est vide quand il reste moins de 0,5 L. Les fûts déjà ouverts ne sont pas comptés dans le stock magasin. Autonomie = litres restants ÷ consommation moyenne des 30 derniers jours.</p>';
 }
 function hDepForm(d) { const isNew = !d; d = d || { date: today(), huile: S.f.hHuile || huilesList()[0], atelier: S.f.hAt || (S.params.ateliers || [])[0], cont: 208, litres: "" };
   const ov = modal(isNew ? "Fût déjà ouvert en atelier" : "Modifier le fût ouvert", '<p class="muted" style="margin-top:0">Pour un fût déjà entamé avant l\'utilisation de l\'application. Il n\'est pas déduit du stock magasin ; la consommation des engins sera imputée sur ce fût en premier.</p><div class="fgrid">' +
@@ -1382,7 +1382,7 @@ const H_KIND = { dep: ["huile_sorties", () => S.hSor, hDepForm, "ce fût ouvert"
 function hExport(k) { const R = VIEWS.huiles.rows.bind(VIEWS.huiles);
   if (k === "ent") return xls("Huiles_entrees_" + today() + ".xlsx", "Entrées fûts", R("ent").map(e => ({ "Date": fD(e.date), "Huile": e.huile, "Fûts BC": e.bc ?? "", "Fûts BL": e.bl ?? "", "L / fût": e.cont, "Litres livrés": N(e.bl) * e.cont, "N° BC": e.numBc, "N° BL": e.numBl, "Fournisseur": e.fourn, "Observations": e.obs, "Saisi par": nameOf(e.createdBy) })));
   if (k === "sor") return xls("Huiles_bons_sortie_" + today() + ".xlsx", "Bons de sortie", R("sor").map(s => ({ "Date": fD(s.date), "N° bon de sortie": s.numBs, "Huile": s.huile, "Atelier": s.atelier, "Fûts": s.futs, "Litres": s.futs * s.cont, "Observations": s.obs, "Saisi par": nameOf(s.createdBy) })));
-  if (k === "alim") { const F_ = hFuts(); return xls("Huiles_alimentation_ateliers_" + today() + ".xlsx", "Fûts en atelier", F_.futs.filter(hAlimFilter).map(u => ({ "Atelier": u.atelier, "Huile": u.huile, "Fût": u.label, "Mis en service le": fD(u.date), "Litres au départ": u.cap, "Consommé (L)": u.cons, "Reste (L)": u.reste, "Reste (%)": Math.round(u.pct), "Statut": u.statut, "Engins servis": u.engins.size, "Interventions": u.n, "Dernière conso": fD(u.last), "Durée (jours)": u.jours }))); }
+  if (k === "alim") { const F_ = hFuts(); return xls("Huiles_alimentation_ateliers_" + today() + ".xlsx", "Fûts en atelier", F_.futs.filter(hAlimFilter).map(u => ({ "Atelier": u.atelier, "Huile": u.huile, "Fût": u.label, "Mis en service le": fD(u.date), "Contenance (L)": u.cont, "Quantité au départ": u.cap, "Consommé (L)": u.cons, "Reste (L)": u.reste, "Reste (%)": Math.round(u.pct), "Statut": u.statut, "Engins servis": u.engins.size, "Interventions": u.n, "Dernière conso": fD(u.last), "Durée (jours)": u.jours }))); }
   if (k === "conso") return xls("Huiles_consommation_" + today() + ".xlsx", "Consommation", R("conso").map(c => ({ "Date": fD(c.date), "Code engin": c.engin, "Engin": C.label(c.engin), "Huile": c.huile, "Entretien": c.entretien, "Quantité (L)": c.qte, "Atelier": c.atelier, "Compteur": c.compteur ?? "", "Observations": c.obs, "Saisi par": nameOf(c.createdBy) })));
   const H = hCompute(); return xls("Huiles_stock_" + today() + ".xlsx", "Stock huiles", [...H.values()].map(o => ({ "Huile": o.huile, "Fûts en stock magasin": o.futsMag, "Litres en stock magasin": o.litMag, "Fûts commandés non livrés": o.futsAtt, "Litres en atelier (estimé)": o.reste, "Litres consommés (total)": o.conso }))); }
 
