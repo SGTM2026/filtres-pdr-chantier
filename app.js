@@ -442,9 +442,9 @@ function depForm(id) { const l = id ? S.depart.get(+id) : { date: today(), cat: 
     F("d-ref", "Référence *", '<input id="d-ref" list="dl-refs" value="' + esc(l.ref) + '">') + F("d-type", "Désignation / type", '<input id="d-type" list="dl-types" value="' + esc(l.type) + '">') + F("d-mar", "Marque", '<input id="d-mar" list="dl-marques" value="' + esc(l.marque) + '">') +
     F("d-eq", "Réf. équivalentes", '<input id="d-eq" value="' + esc(l.equiv) + '">') + F("d-qte", "Quantité en stock", '<input id="d-qte" type="number" min="0" step="any" value="' + esc(l.qte ?? 0) + '">') + F("d-min", "Stock minimum (seuil, filtres uniquement)", '<input id="d-min" type="number" min="0" step="any" value="' + esc(l.min ?? "") + '">') +
     F("d-emp", "Emplacement magasin", '<input id="d-emp" value="' + esc(l.empl) + '">') + F("d-obs", "Observations", '<input id="d-obs" value="' + esc(l.obs) + '">') + "</div>";
-  modal(id ? "Modifier la ligne de stock de départ" : "Nouvelle ligne de stock de départ", html, async ov => { const ref = fv(ov, "d-ref"); if (!ref) return "Saisissez la référence."; const eng = fv(ov, "d-eng"); if (eng && !C.engMap.has(eng)) return "Code engin inconnu.";
+  modal(id ? "Modifier la ligne de stock de départ" : "Nouvelle ligne de stock de départ", html, async ov => { const ref = fv(ov, "d-ref"); if (!ref) return "Saisissez la référence."; const eng = fv(ov, "d-eng");  // un code absent de la liste des engins est accepté
     const row = { categorie: fv(ov, "d-cat"), date_inv: fv(ov, "d-date") || null, engin: eng || null, ref, type: fv(ov, "d-type") || null, marque: fv(ov, "d-mar") || null, equiv: fv(ov, "d-eq") || null, qte: fnum(ov, "d-qte") || 0, stock_min: fnum(ov, "d-min"), emplacement: fv(ov, "d-emp") || null, obs: fv(ov, "d-obs") || null };
-    applyRow("stock_depart", await must(id ? sb.from("stock_depart").update(row).eq("id", +id).select().single() : sb.from("stock_depart").insert(row).select().single())); toast("Stock de départ enregistré."); }); }
+    applyRow("stock_depart", await must(id ? sb.from("stock_depart").update(row).eq("id", +id).select().single() : sb.from("stock_depart").insert(row).select().single())); toast("Stock de départ enregistré." + (eng && !C.engMap.has(eng) ? " Le code engin " + eng + " n'est pas dans la liste des engins : pensez à créer sa fiche." : "")); }); }
 
 /* ---------- import Excel ---------- */
 const nh = s => String(s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -554,7 +554,7 @@ function buildRow(kind, cells, map, defCat) {
     if (!errs.length && C.sor.some(s => s.cat === cat && s.ref === ref && s.date === dt.v && s.engin === eng && N(s.qte) === N(qte))) warns.push("doublon possible (déjà saisi)");
   } else {
     const qte = pNum(g("qte")), min = pNum(g("min"));
-    if (eng && !C.engMap.has(eng)) errs.push("engin " + eng + " inconnu");
+    if (eng && !C.engMap.has(eng)) warns.push("engin " + eng + " absent de la liste des engins (accepté)");
     if (qte === null || Number.isNaN(qte) || qte < 0) errs.push("quantité invalide"); if (Number.isNaN(min)) errs.push("seuil non numérique");
     row = { categorie: cat, date_inv: dt.v, engin: eng || null, ref, type: pStr(g("type")) || null, marque: pStr(g("marque")) || null, equiv: pStr(g("equiv")) || null, qte, stock_min: Number.isNaN(min) ? null : min, emplacement: pStr(g("empl")) || null, obs: pStr(g("obs")) || null };
   }
