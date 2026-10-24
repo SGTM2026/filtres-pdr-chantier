@@ -383,9 +383,10 @@ const catSel = (id, v) => '<select id="' + id + '"><option value="FILTRE"' + (v 
 async function must(q) { const { data, error } = await q; if (error) throw error; return data; }
 
 /* Désignation / type : liste imposée (Paramètres → Types de filtre) pour les filtres, saisie libre pour les PDR */
-const typeFieldHtml = (cat, v) => { if (cat !== "FILTRE" || !(S.params.types || []).length) return '<input id="f-type" list="dl-types" value="' + esc(v || "") + '">';
-  const L = S.params.types.slice(); if (v && !L.includes(v)) L.push(v);
-  return '<select id="f-type"><option value="">– choisir –</option>' + L.map(x => "<option" + (x === v ? " selected" : "") + ">" + esc(x) + "</option>").join("") + "</select>"; };
+const filtreTypes = () => S.params.types || [];
+const typeFieldHtml = (cat, v) => { if (cat !== "FILTRE" || !filtreTypes().length) return '<input id="f-type" list="dl-types" value="' + esc(v || "") + '">';
+  return '<input id="f-type" data-strict="1" list="dl-ftypes" value="' + esc(v || "") + '" placeholder="Écrire ou choisir dans la liste" autocomplete="off"><datalist id="dl-ftypes">' + filtreTypes().map(x => '<option value="' + esc(x) + '">').join("") + "</datalist>"; };
+const matchFiltreType = v => { const k = nh(v); return k ? filtreTypes().find(x => nh(x) === k) || null : ""; };
 function entreeForm(d, recv) { d = d || { date: today(), cat: S.f.cat }; const isNew = !d.id;
   const html = '<div class="fgrid">' + F("f-cat", "Catégorie", catSel("f-cat", d.cat)) + F("f-date", "Date", '<input id="f-date" type="date" value="' + esc(d.date) + '">') + F("f-ref", "Référence *", '<input id="f-ref" list="dl-refs" value="' + esc(d.ref) + '" autocomplete="off">') +
     F("f-type", "Désignation / type", '<span id="f-type-box">' + typeFieldHtml(d.cat, d.type) + "</span>") + F("f-marque", "Marque", '<input id="f-marque" list="dl-marques" value="' + esc(d.marque) + '">') + F("f-equiv", "Réf. équivalentes", '<input id="f-equiv" value="' + esc(d.equiv) + '">') +
@@ -394,7 +395,11 @@ function entreeForm(d, recv) { d = d || { date: today(), cat: S.f.cat }; const i
     F("f-bc", "N° BC", '<input id="f-bc" value="' + esc(d.bc) + '">') + F("f-bl", "N° BL", '<input id="f-bl" value="' + esc(d.bl) + '">') + F("f-fourn", "Fournisseur", '<input id="f-fourn" list="dl-fourn" value="' + esc(d.fourn) + '">') + F("f-obs", "Observations", '<input id="f-obs" value="' + esc(d.obs) + '">', "full") + '<div class="hint full" id="f-info"></div></div>';
   const ov = modal(isNew ? "Nouvelle entrée" : (recv ? "Réception (BL)" : "Modifier l'entrée"), html, async ov => {
     const ref = fv(ov, "f-ref"); if (!ref) return "Saisissez la référence."; if (!fv(ov, "f-date")) return "Saisissez la date.";
-    if (fv(ov, "f-cat") === "FILTRE" && ov.querySelector("#f-type").tagName === "SELECT" && !fv(ov, "f-type")) return "Choisissez la désignation / type du filtre.";
+    const ft = ov.querySelector("#f-type");
+    if (fv(ov, "f-cat") === "FILTRE" && ft.dataset.strict) { const v = fv(ov, "f-type"), m = matchFiltreType(v);
+      if (!v) return "Saisissez la désignation / type du filtre (choisissez-la dans la liste).";
+      if (!m && v !== (d.type || "")) return "Désignation « " + v + " » non valide : choisissez une désignation de la liste (Paramètres → Types de filtre).";
+      if (m) ft.value = m; }
     const dem = fnum(ov, "f-dem"), liv = fnum(ov, "f-liv"); if (dem === null && liv === null) return "Saisissez au moins la quantité demandée (BC) ou livrée (BL).";
     if ((dem !== null && dem < 0) || (liv !== null && liv < 0)) return "Les quantités ne peuvent pas être négatives.";
     const eng = fv(ov, "f-engin"); if (eng && !C.engMap.has(eng)) return "Code engin inconnu : choisissez-le dans la liste (ou laissez vide pour le stock commun).";
@@ -403,7 +408,7 @@ function entreeForm(d, recv) { d = d || { date: today(), cat: S.f.cat }; const i
     else { const r = await must(sb.from("entrees").update(row).eq("id", d.id).select()); if (!r.length) return "Modification refusée : vos droits ne le permettent pas."; applyRow("entrees", r[0]); toast("Entrée modifiée."); }
   }, recv ? "Enregistrer la réception" : "Enregistrer");
   const upd = () => { const ref = fv(ov, "f-ref"), cat = fv(ov, "f-cat"), i = ref ? C.info(ref, cat) : null, box = ov.querySelector("#f-info");
-    if (ref && i && (i.type || i.marque)) { if (!fv(ov, "f-type")) { const ft = ov.querySelector("#f-type"); if (ft.tagName !== "SELECT" || [...ft.options].some(o => o.value === i.type)) ft.value = i.type; } if (!fv(ov, "f-marque")) ov.querySelector("#f-marque").value = i.marque; if (!fv(ov, "f-equiv")) ov.querySelector("#f-equiv").value = i.equiv; }
+    if (ref && i && (i.type || i.marque)) { if (!fv(ov, "f-type")) { const ft = ov.querySelector("#f-type"); if (!ft.dataset.strict || matchFiltreType(i.type)) ft.value = ft.dataset.strict ? matchFiltreType(i.type) : i.type; } if (!fv(ov, "f-marque")) ov.querySelector("#f-marque").value = i.marque; if (!fv(ov, "f-equiv")) ov.querySelector("#f-equiv").value = i.equiv; }
     const eng = fv(ov, "f-engin"), l = ref ? C.lineMap.get(KEY(cat, ref, eng)) : null;
     box.textContent = ref ? (l ? "Stock actuel de cette ligne (" + (eng || "commun") + ") : " + nb(l.stock) : "Nouvelle ligne de stock : elle sera créée à la première livraison.") : ""; };
   ov.querySelector("#f-cat").addEventListener("change", () => { const box = ov.querySelector("#f-type-box"), v = fv(ov, "f-type"); box.innerHTML = typeFieldHtml(fv(ov, "f-cat"), v); });
