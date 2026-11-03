@@ -425,7 +425,6 @@ function sortieForm(d) { d = d || { date: today(), cat: S.f.cat, intervention: S
   const ov = modal(isNew ? "Nouvelle sortie" : "Modifier la sortie", html, async ov => {
     const eng = fv(ov, "s-engin"), ref = fv(ov, "s-ref"), qte = fnum(ov, "s-qte"), init = fv(ov, "s-init");
     if (!eng || !C.engMap.has(eng)) return "Choisissez le code engin dans la liste."; if (!ref) return "Saisissez la référence."; if (!qte || qte <= 0) return "La quantité doit être supérieure à 0.";
-    if (init && !C.engMap.has(init)) return "Engin initial inconnu : choisissez-le dans la liste ou laissez vide.";
     const row = { categorie: fv(ov, "s-cat"), date: fv(ov, "s-date"), engin: eng, engin_initial: init || null, compteur: fnum(ov, "s-cpt"), intervention: fv(ov, "s-int") || null, ref, qte, atelier: fv(ov, "s-at") || null, obs: fv(ov, "s-obs") || null };
     if (isNew) { applyRow("sorties", await must(sb.from("sorties").insert(row).select().single())); toast("Sortie enregistrée."); }
     else { const r = await must(sb.from("sorties").update(row).eq("id", d.id).select()); if (!r.length) return "Modification refusée : vos droits ne le permettent pas."; applyRow("sorties", r[0]); toast("Sortie modifiée."); } });
@@ -559,7 +558,7 @@ function buildRow(kind, cells, map, defCat) {
   } else if (kind === "sorties") {
     const qte = pNum(g("qte")), cpt = pNum(g("compteur")), init = pStr(g("enginInit"));
     if (!eng) errs.push("code engin vide"); else if (!C.engMap.has(eng)) errs.push("engin " + eng + " inconnu");
-    if (init && !C.engMap.has(init)) errs.push("engin initial " + init + " inconnu");
+    if (init && !C.engMap.has(init)) warns.push("engin initial " + init + " absent de la liste des engins (accepté)");
     if (qte === null || Number.isNaN(qte) || qte <= 0) errs.push("quantité invalide"); if (Number.isNaN(cpt)) errs.push("compteur non numérique");
     row = { categorie: cat, date: dt.v, engin: eng, engin_initial: init || null, compteur: Number.isNaN(cpt) ? null : cpt, intervention: pStr(g("intervention")) || null, ref, qte, atelier: pStr(g("atelier")) || null, obs: pStr(g("obs")) || null };
     if (!errs.length && C.sor.some(s => s.cat === cat && s.ref === ref && s.date === dt.v && s.engin === eng && N(s.qte) === N(qte))) warns.push("doublon possible (déjà saisi)");
