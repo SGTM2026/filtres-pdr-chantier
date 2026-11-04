@@ -1105,7 +1105,7 @@ function hCompute() {
   const atOf = (o, a) => { a = a || "Non précisé"; if (!o.at.has(a)) o.at.set(a, { atelier: a, recu: 0, conso: 0, futs: 0 }); return o.at.get(a); };
   for (const s of S.hSor.values()) { const o = get(s.huile), a = atOf(o, s.atelier); a.recu += hsLit(s); a.futs += s.futs; if (s.depart) continue; o.futsOut += s.futs; o.litOut += s.futs * s.cont; if ((s.date || "") > o.lastOut) o.lastOut = s.date; }
   for (const c of S.hCon.values()) { const o = get(c.huile); o.conso += c.qte; atOf(o, c.atelier).conso += c.qte; }
-  for (const o of H.values()) { o.futsMag = o.futsIn - o.futsOut; o.litMag = o.litIn - o.litOut; o.reste = [...o.at.values()].reduce((t, a) => t + a.recu, 0) - o.conso; }
+  for (const o of H.values()) { o.futsMag = o.futsIn - o.futsOut; o.litMag = o.futsMag * hContStd(o.huile);  /* litres en stock = fûts en stock × contenance (Paramètres) */ o.reste = [...o.at.values()].reduce((t, a) => t + a.recu, 0) - o.conso; }
   return H;
 }
 const hSeuilG = () => N(S.params.seuil_huile ?? 4) || 4;
