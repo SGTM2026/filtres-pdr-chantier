@@ -1161,12 +1161,31 @@ VIEWS.hdash = { title: "Gestion huiles – tableau de bord",
     if (nAl) h += '<div class="banner crit">⚠ Stock à réapprovisionner : ' + D.alertes.map(o => esc(o.huile) + " (" + nb(o.futsMag) + " fût" + (Math.abs(o.futsMag) > 1 ? "s" : "") + ")").join(" · ") + "</div>";
     h += '<div class="grid2"><div class="panel"><h3>Litres consommés par type d\'huile</h3>' + hBars(D.byH.map(r => ({ label: r.huile, labelHtml: esc(r.huile), v: r.v, sub: r.n + " interv." })), { fmt: L_ }) +
       '</div><div class="panel"><h3>Nombre d\'entretiens par type</h3>' + hBars(D.byE.filter(r => r.n).map(r => ({ label: r.type, labelHtml: esc(r.type), v: r.n, sub: L_(r.v) })), { fmt: v => nb(v) + " fois" }) + "</div></div>";
+    h += hAtelierConsoPanel(f, to);
     h += '<div class="panel"><h3>Engins les plus consommateurs <small>top 10</small></h3>' + hBars(D.top.slice(0, 10).map(o => ({ label: o.engin + " " + C.label(o.engin), labelHtml: mono(o.engin) + ' <span class="muted">' + esc(C.label(o.engin)) + "</span>", v: o.v, sub: o.n + " interv." + (o.fuites ? " · " + o.fuites + " fuite(s)" : "") })), { fmt: L_ }) + "</div>";
     h += '<div class="panel"><h3>Consommation mensuelle <small>' + (D.monthly.length ? esc(D.monthly[0].long + " – " + D.monthly[D.monthly.length - 1].long) : "") + "</small></h3>" + hMonthsBars(D.monthly) + "</div>";
     h += '<div class="grid2"><div class="panel"><h3>Fuites répétées <small>2 fuites ou plus sur la période</small></h3>' + table([{ h: "Code engin", f: o => mono(o.engin) }, { h: "Engin", f: o => esc(C.label(o.engin)) }, { h: "Fuites", n: 1, f: o => '<span class="reste">' + nb(o.fuites) + "</span>" }, { h: "Litres", n: 1, f: o => L_(o.v) }, { h: "Dernière", f: o => fD(o.last) }], D.fuites, { empty: "Aucune fuite répétée : rien à signaler." }) + "</div>";
     h += '<div class="panel"><h3>Stock magasin et contrôle atelier</h3>' + table([{ h: "Huile", f: o => esc(o.huile) }, { h: "Fûts en stock", n: 1, f: o => "<b>" + nb(o.futsMag) + "</b>" }, { h: "Statut", f: o => pill(hStatut(o)) }], D.Hs) +
       (D.ecarts.length ? '<div class="banner crit" style="margin-top:10px">⚠ ' + D.ecarts.length + " écart(s) atelier : " + D.ecarts.map(a => esc(a.atelier + " · " + a.huile + " " + L_(a.ec))).join(" ; ") + "</div>" : '<div class="banner ok" style="margin-top:10px">✔ Consommations couvertes par les fûts sortis du magasin.</div>') + "</div></div>";
     return h; } };
+
+/* consommation par atelier pour un type d'huile, sur la période du tableau de bord */
+function hAtelierConsoPanel(f, to) {
+  const all = [...S.hCon.values()].filter(c => inPeriod(c.date, f, to) && !isGraisse(c.huile)), hus = huilesConso();
+  const hu = S.f.hdAtH !== undefined ? S.f.hdAtH : (S.f.hHuile || ""), L = all.filter(c => !hu || c.huile === hu), tot = L.reduce((t, c) => t + c.qte, 0);
+  const ats = [...new Set(hAteliers().concat(L.map(c => c.atelier || "Non précisé")))];
+  const rows = ats.map(a => { const X = L.filter(c => (c.atelier || "Non précisé") === a), v = X.reduce((t, c) => t + c.qte, 0), n = t => X.filter(c => c.entretien === t).length;
+    return { atelier: a, v, n: X.length, jour: X.filter(c => c.equipe !== "NUIT").reduce((t, c) => t + c.qte, 0), nuit: X.filter(c => c.equipe === "NUIT").reduce((t, c) => t + c.qte, 0), vid: n("Vidange"), fui: n("Fuite"), niv: n("Remise à niveau"), eng: new Set(X.map(c => c.engin)).size }; })
+    .filter(r => r.v > 0 || hAteliers().includes(r.atelier)).sort((a, b) => b.v - a.v);
+  const sel = '<select id="hd-at-h" style="width:auto;min-width:200px"><option value="">Toutes les huiles</option>' + hus.map(x => "<option" + (x === hu ? " selected" : "") + ">" + esc(x) + "</option>").join("") + "</select>";
+  let h = '<div class="panel"><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px"><h3 style="margin:0">Consommation par atelier <small>' + (hu ? esc(hu) : "toutes les huiles") + " · " + L_(tot) + '</small></h3><span class="grow"></span><label class="muted" for="hd-at-h" style="font-size:12px;text-transform:uppercase;letter-spacing:.05em">Type d\'huile</label>' + sel + "</div>";
+  if (!tot) return h + '<div class="empty">Aucune consommation' + (hu ? " de " + esc(hu) : "") + " sur la période.</div></div>";
+  h += '<div style="margin-bottom:14px">' + hBars(rows.filter(r => r.v > 0).map(r => ({ label: r.atelier, labelHtml: esc(r.atelier), v: r.v, sub: r.n + " interv. · " + Math.round(r.v / tot * 100) + " %" })), { fmt: L_ }) + "</div>";
+  h += table([{ h: "Atelier", f: r => "<b>" + esc(r.atelier) + "</b>" }, { h: "Litres", n: 1, f: r => "<b>" + L_(r.v) + "</b>" }, { h: "Part", n: 1, f: r => tot ? Math.round(r.v / tot * 100) + " %" : "–" }, { h: "Jour / nuit", n: 1, f: r => r.v ? L_(r.jour) + ' <span class="muted">/</span> ' + L_(r.nuit) : "–" },
+    { h: "Interventions", n: 1, f: r => nb(r.n) }, { h: "Vidange", n: 1, f: r => nb(r.vid) }, { h: "Fuite", n: 1, f: r => r.fui ? '<span class="reste">' + nb(r.fui) + "</span>" : "0" }, { h: "Remise à niveau", n: 1, f: r => nb(r.niv) }, { h: "Engins servis", n: 1, f: r => nb(r.eng) }], rows);
+  return h + "</div>";
+}
+document.addEventListener("change", e => { if (e.target.id === "hd-at-h") { S.f.hdAtH = e.target.value; render(); } });
 
 /* ---------- rapports PDF / Excel ---------- */
 const H_PETROL = [15, 76, 92];
