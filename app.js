@@ -1522,7 +1522,8 @@ VIEWS.gamme = { title: "Gamme maintenance prv",
     if (!S.f.gmCode) return '<div class="empty">Saisissez un code engin, choisissez le cycle de vidange puis cliquez « Rechercher ».<br><span class="muted">' + GAMMES.length + " gammes · " + GAMMES.reduce((t, g) => t + g.codes.length, 0) + " engins</span></div>";
     const R = gammeResult(), e = S.engins.get(R.code);
     let h = '<div class="card-head"><span class="code">' + esc(R.code) + '</span><span class="desc">' + esc(e ? e.designation || "" : (R.g ? R.g.desc : "⚠ Code absent de la liste des engins")) + "</span></div>";
-    h += '<div class="kpis">' + kpi("Désignation", esc((e && e.designation) || (R.g && R.g.desc) || "–"), "txt") + kpi("Marque", esc((e && e.marque) || "–"), "txt") + kpi("Type", esc((e && e.modele) || (R.g && R.g.mod) || "–"), "txt") + kpi("N° de série", esc((e && e.serie) || "–"), "txt") + (R.g ? kpi("Cycle de vidange", esc(R.cycle), "txt") : "") + "</div>";
+    const chip = (l, v) => '<span class="chip">' + l + " <b>" + esc(v || "–") + "</b></span>";
+    h += '<div class="chips" style="margin-bottom:10px">' + chip("Désignation", (e && e.designation) || (R.g && R.g.desc)) + chip("Marque", e && e.marque) + chip("Type", (e && e.modele) || (R.g && R.g.mod)) + chip("N° de série", e && e.serie) + (R.g ? chip("Cycle de vidange", R.cycle) : "") + "</div>";
     if (!R.g) return h + '<div class="banner crit">Aucune gamme de maintenance trouvée pour l\'engin ' + esc(R.code) + ".</div>";
     h += '<p class="muted" style="margin:4px 0 10px">Gamme : <b>' + esc(R.g.mod) + "</b> – " + esc(R.g.desc) + " (" + esc(R.g.fam) + ") · engins de cette gamme : " + R.g.codes.map(mono).join(" ") + "</p>";
     R.g.notes.forEach(n => { h += '<div class="banner info">' + esc(n) + "</div>"; });
