@@ -116,7 +116,7 @@ const NAV = [
   ["Huiles", [["huiles", "Suivi huiles"]]],
   ["Achats", [["da", "Création DA", "da"], ["suivida", "Suivi DA", "da"], ["suivibc", "Suivi BC", "da"]]],
   ["Recherche", [["engin", "Suivi par engin"], ["ref", "Recherche référence"], ["gamme", "Gamme maintenance prv"]]],
-  ["Référentiel", [["engins", "Engins", true], ["depart", "Stock de départ", true], ["params", "Paramètres", true]]],
+  ["Référentiel", [["engins", "Engins", true], ["depart", "Stock de départ", true], ["params", "Paramètres", true], ["gparam", "Paramètre gamme", true]]],
   ["Administration", [["users", "Utilisateurs", true], ["compte", "Mon compte"]]]
 ];
 let navHtml = "";
@@ -1484,8 +1484,8 @@ function hExport(k) { const R = VIEWS.huiles.rows.bind(VIEWS.huiles);
    (gammes.json, issu de « Filtres par gamme – Grand Stade Benslimane »), avec choix du stock à utiliser
    ===================================================================== */
 let GAMMES = null, gammesLoading = null;
-function loadGammes() { return gammesLoading || (gammesLoading = fetch("gammes.json?v=" + (S.params.gammes_v || "1"), { cache: "no-cache" }).then(r => { if (!r.ok) throw new Error("gammes.json introuvable"); return r.json(); })
-  .then(j => { GAMMES = j.gammes || []; schedule(); }).catch(e => { gammesLoading = null; toast("Gammes non chargées : " + errMsg(e)); })); }
+let loadGammes = function () { return gammesLoading || (gammesLoading = fetch("gammes.json?v=" + (S.params.gammes_v || "1"), { cache: "no-cache" }).then(r => { if (!r.ok) throw new Error("gammes.json introuvable"); return r.json(); })
+  .then(j => { GAMMES = j.gammes || []; schedule(); }).catch(e => { gammesLoading = null; toast("Gammes non chargées : " + errMsg(e)); })); };
 const nRef = s => String(s || "").toUpperCase().replace(/[\s.,\-/]/g, "");
 const gammeOf = code => (GAMMES || []).find(g => g.codes.includes(String(code)));
 /* choix du stock pour une ligne de gamme : 1) stock propre de l'engin 2) stock commun 3) engin hors parc (absent de la liste des engins) 4) engin qui a le plus grand stock */
@@ -1565,6 +1565,63 @@ async function gammePdf() {
   doc.save("Gamme_" + fileSafe(R.code) + "_" + fileSafe(R.cycle.split(" / ")[0]) + ".pdf");
 }
 
+/* ---------- Paramètre gamme (administrateur) : modification des gammes, enregistrées dans la table « gammes » ---------- */
+let gmSeeding = false;
+const mapGM = r => ({ id: r.id, ordre: r.ordre || 0, fam: r.famille || "", mod: r.modele || "", desc: r.descr || "", codes: (r.codes || []).map(String), cyc: r.cycles && r.cycles.length ? r.cycles : ["500 h", "1000 h", "2000 h"], notes: r.notes || [], l: r.lignes || [] });
+const gmRow = g => ({ ordre: g.ordre || 0, famille: g.fam || null, modele: g.mod, descr: g.desc || null, codes: g.codes, cycles: g.cyc, notes: g.notes, lignes: g.l });
+/* « P553771 (commun) / LF3970 (61446) / 510675408 (commun – à vérifier) » → liste de références candidates */
+function gmParseRefs(txt, flag) { const out = []; const t = String(txt || "").trim(); if (!t || /^(pas en stock|à renseigner|a renseigner|–|-)$/i.test(t)) return out;
+  for (let part of t.split(/\s+\/\s+/)) { part = part.trim(); const m = part.match(/^(.*?)\s*\((.*)\)\s*$/); let ref = m ? m[1].trim() : part, ann = m ? m[2] : "";
+    if (!ref || /^(pas en stock|à renseigner)$/i.test(ref)) continue; if (ann.startsWith("=")) ann = "";
+    const x = { r: ref }, codes = ann.match(/\b\d{4,6}\b/g); if (codes) x.c = codes; if (/commun/i.test(ann)) x.m = 1; if (/vérifier/i.test(ann)) x.v = 1; if (flag) x[flag] = 1; out.push(x); }
+  return out; }
+function gmBuildRefs(l) { const seen = new Set(), R = []; for (const x of [...gmParseRefs(l.t), ...gmParseRefs(l.re, "e"), ...gmParseRefs(l.rc, "k")]) { const k = nRef(x.r); if (!k || seen.has(k)) continue; seen.add(k); R.push(x); } return R; }
+async function loadGammesDb(seedIfEmpty) {
+  const rows = await fetchAll("gammes", "ordre");
+  if (rows.length) { GAMMES = rows.map(mapGM); gammesLoading = Promise.resolve(); schedule(); return; }
+  const j = await (await fetch("gammes.json?v=1", { cache: "no-cache" })).json(), G = j.gammes || [];
+  if (seedIfEmpty && S.isAdmin && G.length) { const ins = await must(sb.from("gammes").insert(G.map((g, i) => gmRow(Object.assign({ ordre: i + 1 }, g)))).select()); GAMMES = ins.map(mapGM); toast(ins.length + " gammes chargées dans la base : elles sont maintenant modifiables."); }
+  else GAMMES = G.map((g, i) => Object.assign({ id: null, ordre: i + 1 }, g));
+  gammesLoading = Promise.resolve(); schedule(); }
+loadGammes = function () { return gammesLoading || (gammesLoading = loadGammesDb(false).catch(e => { gammesLoading = null; toast("Gammes non chargées : " + errMsg(e)); })); };
+const gmMatch = (g, q) => !q || norm([g.mod, g.desc, g.fam, ...g.codes, ...g.codes.map(c => { const e = S.engins.get(c); return e ? [e.designation, e.marque, e.modele].join(" ") : ""; })].join(" ")).includes(q);
+VIEWS.gparam = { title: "Paramètre gamme",
+  tools: () => '<div class="tools">' + searchF("gp-q", S.f.gpQ, "Code engin, type (ex. HILUX, PDS 185S), désignation…") + '<span class="grow"></span>' + (S.isAdmin ? '<button class="btn primary" data-act="gp-new">+ Nouvelle gamme</button>' : "") + "</div>",
+  bind() { $("#gp-q").oninput = e => { S.f.gpQ = e.target.value; render(); }; },
+  body() { if (!S.isAdmin) return '<div class="empty">Réservé aux administrateurs.</div>';
+    if (!GAMMES || !GAMMES.some(g => g.id)) { if (!gmSeeding) { gmSeeding = true; gammesLoading = loadGammesDb(true).catch(e => { gammesLoading = null; toast("Gammes : " + errMsg(e)); }).finally(() => { gmSeeding = false; }); } return '<div class="empty">Chargement des gammes…</div>'; }
+    const q = norm(S.f.gpQ || ""); if (!q) return '<div class="empty">Écrivez un code engin ou un type d\'engin pour afficher ses gammes.<br><span class="muted">' + GAMMES.length + " gammes · " + GAMMES.reduce((t, g) => t + g.codes.length, 0) + " engins</span></div>";
+    const r = GAMMES.filter(g => gmMatch(g, q)).sort((a, b) => a.ordre - b.ordre);
+    return '<div class="more">' + r.length + " gamme(s)</div>" + table([{ h: "Famille", f: g => esc(g.fam) }, { h: "Modèle / type", f: g => "<b>" + esc(g.mod) + "</b>" }, { h: "Désignation", f: g => esc(g.desc) },
+      { h: "Engins", f: g => g.codes.map(c => (S.f.gpQ && c.includes(S.f.gpQ.trim()) ? "<b>" + mono(c) + "</b>" : mono(c))).join(" ") }, { h: "Filtres", n: 1, f: g => nb(g.l.length) },
+      { h: "", f: g => '<div class="rowact"><button class="btn small primary" data-act="gp-edit" data-id="' + g.id + '">Modifier</button><button class="btn small danger" data-act="gp-del" data-id="' + g.id + '">Suppr.</button></div>' }], r, { empty: "Aucune gamme ne correspond." }); } };
+const gpLine = (l, cyc) => '<tr><td><input class="gp-f" value="' + esc(l.f || "") + '"></td><td><input class="gp-t" value="' + esc(l.t || "") + '" placeholder="REF / REF (commun) / REF (code)"></td><td><input class="gp-rc" value="' + esc(l.rc || "") + '"></td><td><input class="gp-re" value="' + esc(l.re || "") + '"></td>' +
+  cyc.map((c, i) => '<td><input class="gp-q" data-i="' + i + '" type="number" min="0" step="any" value="' + esc(l.q && l.q[i] ? l.q[i] : "") + '" style="width:62px" placeholder="–"></td>').join("") + '<td><button type="button" class="btn small danger gp-del-l" title="Retirer la ligne">×</button></td></tr>';
+function gammeForm(g) { const isNew = !g; g = g || { mod: "", desc: "", fam: "", codes: S.f.gpQ && /^\d{4,6}$/.test(S.f.gpQ.trim()) ? [S.f.gpQ.trim()] : [], cyc: ["500 h", "1000 h", "2000 h"], notes: [], l: [] };
+  const cyc = g.cyc.slice(0, 3); while (cyc.length < 3) cyc.push(["500 h", "1000 h", "2000 h"][cyc.length]);
+  const L = g.l.length ? g.l : [{ f: "", t: "", rc: "", re: "", q: [] }];
+  const html = '<div class="fgrid">' + F("gp-mod", "Modèle / type *", '<input id="gp-mod" value="' + esc(g.mod) + '">') + F("gp-desc", "Désignation", '<input id="gp-desc" value="' + esc(g.desc) + '">') + F("gp-fam", "Famille", '<input id="gp-fam" value="' + esc(g.fam) + '" list="dl-gp-fam"><datalist id="dl-gp-fam">' + [...new Set((GAMMES || []).map(x => x.fam).filter(Boolean))].map(f => '<option value="' + esc(f) + '">').join("") + "</datalist>") +
+    F("gp-codes", "Codes engins de cette gamme * (séparés par des virgules)", '<input id="gp-codes" value="' + esc(g.codes.join(", ")) + '">', "full") +
+    cyc.map((c, i) => F("gp-c" + i, "Cycle " + (i + 1), '<input id="gp-c' + i + '" value="' + esc(c) + '">')).join("") +
+    F("gp-notes", "Remarques (une par ligne)", '<textarea id="gp-notes" rows="2">' + esc(g.notes.join("\n")) + "</textarea>", "full") + "</div>" +
+    '<div class="tw le"><table><thead><tr><th style="width:190px">Type de filtre</th><th>Références stock</th><th style="width:140px">Réf. constructeur</th><th style="width:140px">Réf. équivalente</th>' + cyc.map((c, i) => '<th class="n gp-ch" data-i="' + i + '">' + esc(c.split(" / ")[0]) + "</th>").join("") + '<th></th></tr></thead><tbody id="gp-body">' + L.map(l => gpLine(l, cyc)).join("") + "</tbody></table></div>" +
+    '<div class="actions" style="justify-content:flex-start;margin-top:8px"><button type="button" class="btn small" id="gp-add">+ Ajouter un filtre</button><span class="hint">Références stock : plusieurs séparées par « / » ; « (commun) » = stock commun, « (61446) » = réf. pour cet engin seulement. Quantité vide = pas de remplacement à ce cycle.</span></div>';
+  const ov = modal(isNew ? "Nouvelle gamme" : "Modifier la gamme " + g.mod, html, async ov => {
+    const mod = fv(ov, "gp-mod"); if (!mod) return "Saisissez le modèle / type.";
+    const codes = [...new Set(fv(ov, "gp-codes").split(/[\s,;]+/).map(s => s.trim()).filter(Boolean))]; if (!codes.length) return "Saisissez au moins un code engin.";
+    const dup = codes.map(c => [c, (GAMMES || []).find(x => x.id !== g.id && x.codes.includes(c))]).filter(x => x[1]); if (dup.length) return "Code(s) déjà dans une autre gamme : " + dup.map(([c, x]) => c + " (" + x.mod + ")").join(", ") + ". Retirez-les d'abord de cette gamme.";
+    const cy = [0, 1, 2].map(i => fv(ov, "gp-c" + i) || ["500 h", "1000 h", "2000 h"][i]);
+    const lignes = [...ov.querySelectorAll("#gp-body tr")].map(tr => { const v = c => tr.querySelector(c).value.trim(); const l = { f: v(".gp-f"), t: v(".gp-t") || "Pas en stock", rc: v(".gp-rc"), re: v(".gp-re"), q: [...tr.querySelectorAll(".gp-q")].map(i => N(String(i.value).replace(",", "."))) }; l.refs = gmBuildRefs(l); return l; }).filter(l => l.f);
+    if (!lignes.length) return "Ajoutez au moins un filtre.";
+    const row = gmRow({ ordre: g.ordre || ((GAMMES || []).reduce((m, x) => Math.max(m, x.ordre), 0) + 1), fam: fv(ov, "gp-fam"), mod, desc: fv(ov, "gp-desc"), codes, cyc: cy, notes: fv(ov, "gp-notes").split("\n").map(s => s.trim()).filter(Boolean), l: lignes });
+    const r = isNew ? await must(sb.from("gammes").insert(Object.assign(row, { source: "app" })).select().single()) : (await must(sb.from("gammes").update(Object.assign(row, { updated_at: new Date().toISOString(), updated_by: S.uid })).eq("id", g.id).select()))[0];
+    if (!r) return "Modification refusée."; const m = mapGM(r), i = GAMMES.findIndex(x => x.id === m.id); if (i >= 0) GAMMES[i] = m; else GAMMES.push(m); schedule(); toast("Gamme " + mod + " enregistrée (" + lignes.length + " filtre(s))."); }, "Enregistrer", true);
+  const body = ov.querySelector("#gp-body");
+  ov.querySelector("#gp-add").onclick = () => { body.insertAdjacentHTML("beforeend", gpLine({ f: "", t: "", rc: "", re: "", q: [] }, cyc)); body.lastElementChild.querySelector(".gp-f").focus(); };
+  body.addEventListener("click", e => { const b = e.target.closest(".gp-del-l"); if (b) b.closest("tr").remove(); });
+  [0, 1, 2].forEach(i => ov.querySelector("#gp-c" + i).addEventListener("input", e => { const th = ov.querySelector('.gp-ch[data-i="' + i + '"]'); if (th) th.textContent = e.target.value.split(" / ")[0]; }));
+}
+
 /* ---------- actions ---------- */
 document.addEventListener("click", async e => { const b = e.target.closest("[data-act]"); if (!b) return; const a = b.dataset.act, id = b.dataset.id;
   try {
@@ -1574,6 +1631,10 @@ document.addEventListener("click", async e => { const b = e.target.closest("[dat
     if (a === "h-new-sor") return hSorForm(null);
     if (a === "h-new-con") return hConForm(null);
     if (a === "gm-go") return gammeGo();
+    if (a === "gp-new") return S.isAdmin && gammeForm(null);
+    if (a === "gp-edit") { const g = (GAMMES || []).find(x => x.id === +id); return S.isAdmin && g && gammeForm(JSON.parse(JSON.stringify(g))); }
+    if (a === "gp-del") { const g = (GAMMES || []).find(x => x.id === +id); if (!S.isAdmin || !g) return;
+      return confirmBox("Supprimer la gamme " + g.mod + " (" + g.codes.length + " engin(s), " + g.l.length + " filtre(s)) ?", async () => { const r = await must(sb.from("gammes").delete().eq("id", g.id).select()); if (!r.length) throw new Error("permission denied"); GAMMES = GAMMES.filter(x => x.id !== g.id); schedule(); toast("Gamme supprimée."); }); }
     if (a === "gm-pdf") return await gammePdf();
     if (a === "h-new-dep") return S.isAdmin && hDepForm(null);
     if (a === "dep-save") return S.isAdmin && await depSave(+id);
