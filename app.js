@@ -115,7 +115,7 @@ const NAV = [
   ["Magasin", [["stock", "Stock actuel"], ["entrees", "Entrées (BC / BL)"], ["sorties", "Sorties"]]],
   ["Huiles", [["huiles", "Suivi huiles"]]],
   ["Achats", [["da", "Création DA", "da"], ["suivida", "Suivi DA", "da"], ["suivibc", "Suivi BC", "da"]]],
-  ["Recherche", [["engin", "Suivi par engin"], ["ref", "Recherche référence"]]],
+  ["Recherche", [["engin", "Suivi par engin"], ["ref", "Recherche référence"], ["gamme", "Gamme maintenance prv"]]],
   ["Référentiel", [["engins", "Engins", true], ["depart", "Stock de départ", true], ["params", "Paramètres", true]]],
   ["Administration", [["users", "Utilisateurs", true], ["compte", "Mon compte"]]]
 ];
@@ -1479,6 +1479,91 @@ function hExport(k) { const R = VIEWS.huiles.rows.bind(VIEWS.huiles);
   if (k === "conso") return xls("Huiles_consommation_" + today() + ".xlsx", "Consommation", R("conso").map(c => ({ "Date": fD(c.date), "Code engin": c.engin, "Engin": C.label(c.engin), "Huile": c.huile, "Entretien": c.entretien, "Quantité (L)": c.qte, "Atelier": c.atelier, "Équipe": c.equipe === "NUIT" ? "Nuit" : "Jour", "Compteur": c.compteur ?? "", "Observations": c.obs, "Saisi par": nameOf(c.createdBy) })));
   const H = hCompute(); return xls("Huiles_stock_" + today() + ".xlsx", "Stock huiles", [...H.values()].map(o => ({ "Huile": o.huile, "Fûts en stock magasin": o.futsMag, "Litres en stock magasin": o.litMag, "Fûts commandés non livrés": o.futsAtt, "Litres en atelier (estimé)": o.reste, "Litres consommés (total)": o.conso }))); }
 
+/* =====================================================================
+   GAMME DE MAINTENANCE PRÉVENTIVE : filtres à changer par engin et par cycle de vidange
+   (gammes.json, issu de « Filtres par gamme – Grand Stade Benslimane »), avec choix du stock à utiliser
+   ===================================================================== */
+let GAMMES = null, gammesLoading = null;
+function loadGammes() { return gammesLoading || (gammesLoading = fetch("gammes.json?v=" + (S.params.gammes_v || "1"), { cache: "no-cache" }).then(r => { if (!r.ok) throw new Error("gammes.json introuvable"); return r.json(); })
+  .then(j => { GAMMES = j.gammes || []; schedule(); }).catch(e => { gammesLoading = null; toast("Gammes non chargées : " + errMsg(e)); })); }
+const nRef = s => String(s || "").toUpperCase().replace(/[\s.,\-/]/g, "");
+const gammeOf = code => (GAMMES || []).find(g => g.codes.includes(String(code)));
+/* choix du stock pour une ligne de gamme : 1) stock propre de l'engin 2) stock commun 3) engin hors parc (absent de la liste des engins) 4) engin qui a le plus grand stock */
+function gammeChoix(l, code, q) {
+  const prio = r => r.c && r.c.includes(code) ? 0 : (r.k ? 3 : (r.c ? 2 : 1));
+  const cands = l.refs.map((r, i) => ({ r, i, p: prio(r) })).sort((a, b) => a.p - b.p || a.i - b.i);
+  const byRef = new Map(); for (const x of C.lines) { if (x.stock <= 0) continue; const k = nRef(x.ref); if (!byRef.has(k)) byRef.set(k, []); byRef.get(k).push(x); }
+  const linesOf = c => byRef.get(nRef(c.r.r)) || [];
+  const pick = (test, best) => { let found = null;
+    for (const c of cands) { const L = linesOf(c).filter(test); if (!L.length) continue; const m = L.reduce((a, b) => b.stock > a.stock ? b : a);
+      if (!best) return { c, x: m }; if (!found || m.stock > found.x.stock) found = { c, x: m }; }
+    return found; };
+  let r = pick(x => x.engin === code && x.stock >= q); if (r) return Object.assign(r, { src: "propre" });
+  r = pick(x => x.engin === "" && x.stock >= q); if (r) return Object.assign(r, { src: "commun" });
+  r = pick(x => x.engin && !S.engins.has(x.engin) && x.stock >= q, true); if (r) return Object.assign(r, { src: "horsparc" });
+  r = pick(x => x.engin && x.engin !== code && x.stock >= q, true); if (r) return Object.assign(r, { src: "emprunt" });
+  r = pick(x => true, true); if (r) return Object.assign(r, { src: "insuffisant" });
+  return { c: cands[0] || null, x: null, src: "aucun" };
+}
+function gammeResult() {
+  const code = S.f.gmCode, ci = +(S.f.gmCyc || 0); if (!code) return null;
+  const g = gammeOf(code); if (!g) return { code, g: null };
+  const rows = g.l.map(l => ({ l, q: N(l.q[ci]) })).filter(o => o.q > 0).map(o => Object.assign(o, gammeChoix(o.l, code, o.q)));
+  return { code, g, ci, cycle: g.cyc[ci] || "", rows };
+}
+const GM_SRC = { propre: ["Stock propre de l'engin", "p-ok"], commun: ["Stock commun", "p-ok"], horsparc: ["Engin hors parc", "p-warn"], emprunt: ["Emprunt à un autre engin", "p-warn"], insuffisant: ["Stock insuffisant", "p-crit"], aucun: ["Non disponible", "p-crit"] };
+VIEWS.gamme = { title: "Gamme maintenance prv",
+  tools() { const g = S.f.gmCode && GAMMES ? gammeOf(S.f.gmCode) : null, cyc = g ? g.cyc : ["500 h", "1000 h", "2000 h"];
+    return '<div class="tools">' + field("gm-code", "Code engin", '<input id="gm-code" list="dl-engins" value="' + esc(S.f.gmCodeIn ?? S.f.gmCode ?? "") + '" placeholder="ex. 31549" autocomplete="off">') +
+      field("gm-cyc", "Cycle de vidange", '<select id="gm-cyc">' + cyc.map((c, i) => '<option value="' + i + '"' + (i === +(S.f.gmCyc || 0) ? " selected" : "") + ">" + esc(c) + "</option>").join("") + "</select>") +
+      '<button class="btn primary" data-act="gm-go" style="align-self:flex-end">Rechercher</button><span class="grow"></span>' + (S.f.gmCode ? '<button class="btn" data-act="gm-pdf">Télécharger la gamme (PDF)</button>' : "") + "</div>"; },
+  bind() { const i = $("#gm-code"); i.addEventListener("input", () => { S.f.gmCodeIn = i.value; }); i.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); gammeGo(); } }); },
+  body() { if (!GAMMES) { loadGammes(); return '<div class="empty">Chargement des gammes…</div>'; }
+    if (!S.f.gmCode) return '<div class="empty">Saisissez un code engin, choisissez le cycle de vidange puis cliquez « Rechercher ».<br><span class="muted">' + GAMMES.length + " gammes · " + GAMMES.reduce((t, g) => t + g.codes.length, 0) + " engins</span></div>";
+    const R = gammeResult(), e = S.engins.get(R.code);
+    let h = '<div class="card-head"><span class="code">' + esc(R.code) + '</span><span class="desc">' + esc(e ? e.designation || "" : (R.g ? R.g.desc : "⚠ Code absent de la liste des engins")) + "</span></div>";
+    h += '<div class="kpis">' + kpi("Désignation", esc((e && e.designation) || (R.g && R.g.desc) || "–"), "txt") + kpi("Marque", esc((e && e.marque) || "–"), "txt") + kpi("Type", esc((e && e.modele) || (R.g && R.g.mod) || "–"), "txt") + kpi("N° de série", esc((e && e.serie) || "–"), "txt") + (R.g ? kpi("Cycle de vidange", esc(R.cycle), "txt") : "") + "</div>";
+    if (!R.g) return h + '<div class="banner crit">Aucune gamme de maintenance trouvée pour l\'engin ' + esc(R.code) + ".</div>";
+    h += '<p class="muted" style="margin:4px 0 10px">Gamme : <b>' + esc(R.g.mod) + "</b> – " + esc(R.g.desc) + " (" + esc(R.g.fam) + ") · engins de cette gamme : " + R.g.codes.map(mono).join(" ") + "</p>";
+    R.g.notes.forEach(n => { h += '<div class="banner info">' + esc(n) + "</div>"; });
+    const emp = R.rows.filter(o => o.src === "horsparc" || o.src === "emprunt"), manq = R.rows.filter(o => o.src === "aucun" || o.src === "insuffisant");
+    if (emp.length) h += '<div class="banner crit">↪ ' + emp.length + " filtre(s) à prendre sur le stock d'un autre engin : " + emp.map(o => esc(o.l.f) + " → engin <b>" + esc(o.x.engin) + "</b>").join(" ; ") + ". Saisissez ce code dans « Engin initial (si article emprunté) » de la sortie.</div>";
+    if (manq.length) h += '<div class="banner crit">⚠ ' + manq.length + " filtre(s) non disponible(s) ou en quantité insuffisante : " + manq.map(o => esc(o.l.f)).join(", ") + ".</div>";
+    if (!emp.length && !manq.length && R.rows.length) h += '<div class="banner ok">✔ Tous les filtres de ce cycle sont disponibles sur le stock de l\'engin ou le stock commun.</div>';
+    h += '<div class="panel"><h3>Filtres à changer – ' + esc(R.cycle) + " <small>" + R.rows.length + " filtre(s) · " + nb(R.rows.reduce((t, o) => t + o.q, 0)) + " pièce(s)</small></h3>" + table([
+      { h: "Type de filtre", f: o => "<b>" + esc(o.l.f) + "</b>" },
+      { h: "Référence", f: o => o.x ? mono(o.x.ref) + (o.c && o.c.r.e ? ' <span class="muted" title="référence équivalente">(équiv.)</span>' : "") + (o.c && o.c.r.v ? ' <span class="pill p-warn" title="stock commun proposé par marque, à vérifier">à vérifier</span>' : "") : (o.c ? mono(o.c.r.r) : '<span class="muted">' + esc(o.l.t || "–") + "</span>") },
+      { h: "Qté", n: 1, f: o => "<b>" + nb(o.q) + "</b>" },
+      { h: "Stock utilisé", f: o => { const [t, c] = GM_SRC[o.src]; return '<span class="pill ' + c + '">' + t + "</span>"; } },
+      { h: "Engin initial (si article emprunté)", f: o => o.x && o.x.engin && o.x.engin !== R.code ? "<b>" + mono(o.x.engin) + "</b>" + (S.engins.has(o.x.engin) ? ' <span class="muted">' + esc(C.label(o.x.engin)) + "</span>" : ' <span class="muted">hors parc</span>') : '<span class="muted">–</span>' },
+      { h: "Disponible", n: 1, f: o => o.x ? nb(o.x.stock) : "0" },
+      { h: "Autres réf. de la gamme", f: o => '<span class="muted" style="font-size:12px">' + esc(o.l.refs.filter(r => !o.c || r !== o.c.r).map(r => r.r).join(" / ") || "–") + "</span>" }], R.rows, { empty: "Aucun filtre à changer à ce cycle." }) + "</div>";
+    return h + '<p class="hint">Choix du stock pour chaque filtre : 1) stock propre de l\'engin, 2) stock commun, 3) stock d\'un engin hors parc (code absent de la liste des engins), 4) engin qui a le plus grand stock. Les quantités et références viennent du fichier des gammes ; « à vérifier » = référence du stock commun proposée par marque.</p>'; } };
+function gammeGo() { const i = $("#gm-code"), v = i ? i.value.trim().split(/\s+[–-]\s+/)[0] : ""; if (!v) { toast("Saisissez le code engin."); return; }
+  S.f.gmCode = v; S.f.gmCodeIn = v; const s = $("#gm-cyc"); S.f.gmCyc = s ? +s.value : 0; render(true); }
+async function gammePdf() {
+  const R = gammeResult(); if (!R || !R.g) { toast("Recherchez d'abord un engin qui a une gamme."); return; }
+  await loadScript("vendor/jspdf.umd.min.js"); await loadScript("vendor/jspdf.plugin.autotable.min.js");
+  const { jsPDF } = window.jspdf, doc = new jsPDF({ unit: "mm", format: "a4" }), W = 210, M = 14, e = S.engins.get(R.code) || {}, sp = v => nb(v).replace(/[  ]/g, " ");
+  doc.setFillColor(15, 76, 92); doc.rect(0, 0, W, 24, "F"); doc.setTextColor(255); doc.setFont("helvetica", "bold"); doc.setFontSize(15); doc.text("GAMME DE MAINTENANCE PRÉVENTIVE", M, 11);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.text(S.params.nom_chantier || "", M, 18);
+  doc.setFont("helvetica", "bold"); doc.setFontSize(13); doc.text("Engin " + R.code, W - M, 11, { align: "right" }); doc.setFontSize(10.5); doc.text("Cycle : " + R.cycle.replace(" / ", " – "), W - M, 18.5, { align: "right" });
+  doc.setTextColor(30);
+  doc.autoTable({ startY: 30, body: [["Code engin", R.code], ["Désignation", e.designation || R.g.desc || "-"], ["Marque", e.marque || "-"], ["Type", e.modele || R.g.mod || "-"], ["N° de série", e.serie || "-"], ["Cycle de vidange", R.cycle.replace(" / ", " – ")]],
+    theme: "plain", styles: { fontSize: 9.5, cellPadding: 1.2 }, columnStyles: { 0: { fontStyle: "bold", cellWidth: 38, textColor: [15, 76, 92] } }, margin: { left: M, right: M } });
+  doc.autoTable({ startY: doc.lastAutoTable.finalY + 4, head: [["N°", "Type de filtre", "Référence", "Qté", "Observations"]],
+    body: R.rows.map((o, i) => [String(i + 1), o.l.f, o.x ? o.x.ref : (o.c ? o.c.r.r : (o.l.t || "-")), sp(o.q), ""]),
+    theme: "grid", margin: { left: M, right: M }, styles: { fontSize: 9.5, cellPadding: 2.2, lineColor: [120, 120, 120], lineWidth: 0.1, textColor: 20, minCellHeight: 8 }, headStyles: { fillColor: [255, 255, 0], textColor: 0, fontStyle: "bold", halign: "center" },
+    columnStyles: { 0: { halign: "center", cellWidth: 9 }, 1: { cellWidth: 58 }, 2: { cellWidth: 38, fontStyle: "bold" }, 3: { halign: "center", cellWidth: 12, fontStyle: "bold" }, 4: { cellWidth: "auto" } } });
+  let y = doc.lastAutoTable.finalY + 8; if (y > 230) { doc.addPage(); y = 20; }
+  doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(15, 76, 92); doc.text("Observations", M, y); doc.setDrawColor(150); doc.setLineWidth(0.2); doc.rect(M, y + 2, W - 2 * M, 32);
+  doc.setDrawColor(210); for (let k = 1; k < 4; k++) doc.line(M + 2, y + 2 + k * 8, W - M - 2, y + 2 + k * 8);
+  y += 42; doc.setTextColor(30); doc.setFont("helvetica", "normal"); doc.setFontSize(9.5);
+  doc.text("Date : ____ / ____ / ________", M, y); doc.text("Compteur (h / km) : ______________", M + 62, y); doc.text("Visa technicien : ______________", M + 128, y);
+  const pages = doc.getNumberOfPages(); for (let p = 1; p <= pages; p++) { doc.setPage(p); doc.setFontSize(8); doc.setTextColor(120); doc.text("Gamme " + R.g.mod + " · page " + p + "/" + pages, W / 2, 290, { align: "center" }); }
+  doc.save("Gamme_" + fileSafe(R.code) + "_" + fileSafe(R.cycle.split(" / ")[0]) + ".pdf");
+}
+
 /* ---------- actions ---------- */
 document.addEventListener("click", async e => { const b = e.target.closest("[data-act]"); if (!b) return; const a = b.dataset.act, id = b.dataset.id;
   try {
@@ -1487,6 +1572,8 @@ document.addEventListener("click", async e => { const b = e.target.closest("[dat
     if (a === "h-new-ent") return hEntForm(null);
     if (a === "h-new-sor") return hSorForm(null);
     if (a === "h-new-con") return hConForm(null);
+    if (a === "gm-go") return gammeGo();
+    if (a === "gm-pdf") return await gammePdf();
     if (a === "h-new-dep") return S.isAdmin && hDepForm(null);
     if (a === "dep-save") return S.isAdmin && await depSave(+id);
     if (a === "h-xls") return hExport(b.dataset.k);
