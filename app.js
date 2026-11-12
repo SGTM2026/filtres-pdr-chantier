@@ -1861,6 +1861,13 @@ function gePlanning() {
     let hs = 0, js = 0; for (const x of hist) { const pp = GE.mois.find(y => y.mois === x.mois); if (!pp) continue; hs += N(x.hm); js += Math.round((Date.parse(pp.fin) - Date.parse(pp.debut)) / 864e5) + 1; }
     const rate = js ? hs / js : 0, km = geKm(r);
     const o = { code: r.code, des: r.designation, fam: r.famille, km, cpt: cpt === null ? null : N(cpt), dRef, proch: prochVal || null, der: N(r.der_vidange) || null, dDer: r.date_vidange, rate, mois: r.mois };
+    /* vidange saisie dans Suivi huiles après le reporting : elle remet le compteur à zéro → nouvelle prochaine vidange = compteur de cette vidange + intervalle */
+    const interval = N(r.proch_vidange) && N(r.der_vidange) && N(r.proch_vidange) > N(r.der_vidange) ? N(r.proch_vidange) - N(r.der_vidange) : null;
+    const vh = [...S.hCon.values()].filter(c => c.engin === r.code && c.entretien === "Vidange" && c.date > (per.fin || "")).sort((a, b) => (b.date || "").localeCompare(a.date || ""))[0];
+    if (vh) { const cv = N(vh.compteur) > 0 ? N(vh.compteur) : (o.cpt !== null ? Math.round(N(r.cpt_fin) + rate * Math.max(0, (Date.parse(vh.date) - Date.parse(per.fin)) / 864e5)) : null);
+      o.dDer = vh.date; o.der = cv; o.src = "Suivi huiles" + (N(vh.compteur) > 0 ? "" : " (compteur estimé)");
+      if (interval && cv !== null) o.proch = cv + interval; else if (cv !== null) { o.proch = null; o.note = "intervalle de vidange inconnu"; } }
+    else if (r.date_vidange) o.src = "Reporting";
     if (!o.proch || o.cpt === null) { o.etat = "inconnu"; out.push(o); continue; }
     o.reste = o.proch - o.cpt; o.jours = o.reste <= 0 ? 0 : (rate > 0 ? Math.ceil(o.reste / rate) : null);
     o.date = o.jours === null ? null : new Date(Date.parse(dRef) + o.jours * 864e5).toISOString().slice(0, 10);
@@ -1879,9 +1886,9 @@ function gePlanningHtml(P) {
       { h: "Rythme", n: 1, f: o => o.rate ? nb(Math.round(o.rate * 10) / 10) + (o.km ? " km" : " h") + "/j" : '<span class="muted">0</span>' },
       { h: "Date prévue", f: o => o.date ? "<b>" + fD(o.date) + "</b>" + (o.jAuj !== null ? '<br><span class="muted" style="font-size:11px">' + (o.jAuj < 0 ? "il y a " + -o.jAuj + " j" : "dans " + o.jAuj + " j") + "</span>" : "") : '<span class="muted">–</span>' },
       { h: "État", f: o => { const [t, c] = GE_PL[o.etat]; return '<span class="pill ' + c + '">' + t + "</span>"; } },
-      { h: "Dernière vidange", f: o => o.dDer ? fD(o.dDer) + (o.der ? '<br><span class="muted" style="font-size:11px">à ' + nb(o.der) + "</span>" : "") : '<span class="muted">–</span>' },
+      { h: "Dernière vidange", f: o => o.dDer ? fD(o.dDer) + '<br><span class="muted" style="font-size:11px">' + (o.der ? "à " + nb(o.der) + " · " : "") + esc(o.src || "") + "</span>" : '<span class="muted">' + esc(o.note || "–") + "</span>" },
       { h: "", f: o => '<button type="button" class="btn small" data-act="ge-gamme" data-id="' + esc(o.code) + '" title="Filtres à préparer">Gamme</button>' }], L, { empty: "Aucun engin dans cette catégorie.", limit: 400 }) +
-    '<p class="hint">Date prévue = date du dernier compteur + (prochaine vidange − compteur) ÷ rythme moyen des 3 derniers mois pointés. Compteur actuel = fin du dernier reporting, ou compteur plus récent saisi dans Suivi huiles. « Données manquantes » = pas de compteur de prochaine vidange dans le reporting.</p>'; }
+    '<p class="hint">Date prévue = date du dernier compteur + (prochaine vidange − compteur) ÷ rythme moyen des 3 derniers mois pointés. Compteur actuel = fin du dernier reporting, ou compteur plus récent saisi dans Suivi huiles. Une vidange saisie dans Suivi huiles après le dernier reporting remplace la « dernière vidange » : prochaine vidange = son compteur + l\'intervalle de l\'engin (prochaine − dernière vidange du reporting). « Données manquantes » = pas de compteur de prochaine vidange dans le reporting.</p>'; }
 /* ---------- B. réalisation du préventif ----------
    due : le compteur de l'engin a atteint la « prochaine vidange » connue au mois précédent ;
    à temps : une vidange enregistrée dans le mois au plus tard à prochaine vidange + 10 % de l'intervalle */
