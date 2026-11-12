@@ -1730,18 +1730,31 @@ function geBuild(P, mois) {
         mvt.push({ mois: mois + "-01", code, description: str(r[ix("description")]), depart: str(r[ix("chantierdedepart")]), date_entree: xlDate(r[ix("dateentree")]), date_sortie: xlDate(r[ix("datesortie")]), destination: str(r[ix("chantierdedestination")]) }); } } }
   return { debut, fin, eng, pan, mvt };
 }
+/* enregistre les lignes d'un mois (engins, pannes, mouvements) en remplaçant les anciennes */
+async function geSaveMonth(key, B, extra) {
+  await must(sb.from("rep_mois").upsert(Object.assign({ mois: key, debut: B.debut, fin: B.fin, nb_engins: B.eng.length }, extra || {})).select());
+  for (const t of ["rep_engins", "rep_pannes", "rep_mouvements"]) await must(sb.from(t).delete().eq("mois", key).select("id"));
+  for (let i = 0; i < B.eng.length; i += 200) await must(sb.from("rep_engins").insert(B.eng.slice(i, i + 200)));
+  if (B.pan.length) await must(sb.from("rep_pannes").insert(B.pan)); if (B.mvt.length) await must(sb.from("rep_mouvements").insert(B.mvt)); }
+/* relit les fichiers conservés (stockage « reporting ») : utile quand le calcul évolue, sans recharger les fichiers */
+async function geReread(list) { let ok = 0, ko = [];
+  for (const m of list) { try { if (!m.fichier_path) throw new Error("fichier non conservé");
+      const { data, error } = await sb.storage.from("reporting").download(m.fichier_path); if (error) throw error;
+      const B = geBuild(geParse(XLSX.read(await data.arrayBuffer(), { type: "array" })), m.mois.slice(0, 7)); if (!B.eng.length) throw new Error("aucun engin lu");
+      await geSaveMonth(m.mois, B); ok++; } catch (e) { ko.push(moisTxt(m.mois) + " (" + errMsg(e) + ")"); } }
+  await geLoad(true); toast(ok + " mois relu(s)" + (ko.length ? " · non relus : " + ko.join(", ") : "") + ".", ko.length ? 9000 : undefined); }
 function geImportForm() {
-  let P = null, file = null;
-  const ov = modal("Ajouter un reporting mensuel", '<p class="muted" style="margin-top:0">Fichier « CANEVAS POINTAGE » du mois (feuilles Reporting, Déclaration Standard des Arrêts, Mouvement des Engins). Chaque mois ajouté s\'additionne aux précédents ; réimporter un mois le remplace.</p>' +
+  let P = null, file = null, fileObj = null;
+  const ov = modal("Ajouter un reporting mensuel", '<p class="muted" style="margin-top:0">Fichier « CANEVAS POINTAGE » du mois (feuilles Reporting, Déclaration Standard des Arrêts, Mouvement des Engins). Chaque mois ajouté s\'additionne aux précédents ; réimporter un mois le remplace. Une copie du fichier est conservée : il pourra être relu sans le recharger.</p>' +
     '<div class="fgrid">' + F("ge-file", "Fichier Excel *", '<input id="ge-file" type="file" accept=".xlsx,.xlsm,.xls">') + F("ge-mois", "Mois du reporting *", '<input id="ge-mois" type="month">') + '</div><div id="ge-prev"></div>',
     async ov => { if (!P) return "Choisissez le fichier du reporting."; const mois = fv(ov, "ge-mois"); if (!/^\d{4}-\d{2}$/.test(mois)) return "Choisissez le mois.";
       const B = geBuild(P, mois); if (!B.eng.length) return "Aucun engin trouvé dans la feuille Reporting.";
-      const key = mois + "-01", exists = GE.mois.some(x => x.mois === key);
-      if (exists) await must(sb.from("rep_mois").delete().eq("mois", key));
-      await must(sb.from("rep_mois").insert({ mois: key, debut: B.debut, fin: B.fin, fichier: file, nb_engins: B.eng.length }));
-      try { for (let i = 0; i < B.eng.length; i += 200) await must(sb.from("rep_engins").insert(B.eng.slice(i, i + 200)));
-        if (B.pan.length) await must(sb.from("rep_pannes").insert(B.pan)); if (B.mvt.length) await must(sb.from("rep_mouvements").insert(B.mvt)); }
-      catch (e) { await sb.from("rep_mois").delete().eq("mois", key); throw e; }
+      const key = mois + "-01", exists = GE.mois.some(x => x.mois === key), path = mois + "/" + fileSafe(file || "reporting.xlsx");
+      /* copie du fichier conservée pour pouvoir le relire plus tard */
+      const up = await sb.storage.from("reporting").upload(path, fileObj, { upsert: true, contentType: fileObj.type || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      if (up.error) throw new Error("Copie du fichier impossible : " + errMsg(up.error));
+      const old = (GE.mois.find(x => x.mois === key) || {}).fichier_path; if (old && old !== path) await sb.storage.from("reporting").remove([old]);
+      await geSaveMonth(key, B, { fichier: file, fichier_path: path });
       S.f.geTo = key; if (!S.f.geFrom || S.f.geFrom > key) S.f.geFrom = key; await geLoad(true);
       toast("Reporting de " + moisTxt(mois) + (exists ? " remplacé" : " ajouté") + " : " + B.eng.length + " engins, " + B.pan.length + " panne(s) déclarée(s), " + B.mvt.length + " mouvement(s)."); }, "Ajouter le reporting", true);
   const prev = () => { const box = ov.querySelector("#ge-prev"); if (!P) return; try {
@@ -1749,7 +1762,7 @@ function geImportForm() {
       box.innerHTML = '<div class="banner ' + (ex ? "crit" : "ok") + '">' + (ex ? "⚠ Ce mois existe déjà : il sera remplacé. " : "✔ ") + "Lu : <b>" + B.eng.length + "</b> engins · période du " + fD(B.debut) + " au " + fD(B.fin) + " · " + nb(t("j_m")) + " j marche · " + nb(t("j_af") + t("j_anf")) + " j arrêt · " + nb(t("j_panne")) + " j panne · <b>" + B.pan.length + "</b> panne(s) déclarée(s) · " + B.mvt.length + " mouvement(s).</div>"; }
     catch (err) { box.innerHTML = '<div class="banner crit">' + esc(errMsg(err)) + "</div>"; } };
   ov.querySelector("#ge-mois").addEventListener("change", prev);
-  ov.querySelector("#ge-file").addEventListener("change", async e => { const f = e.target.files[0], box = ov.querySelector("#ge-prev"); P = null; box.innerHTML = ""; if (!f) return; file = f.name;
+  ov.querySelector("#ge-file").addEventListener("change", async e => { const f = e.target.files[0], box = ov.querySelector("#ge-prev"); P = null; box.innerHTML = ""; if (!f) return; file = f.name; fileObj = f;
     try { P = geParse(XLSX.read(await f.arrayBuffer(), { type: "array" })); if (P.dateRef) ov.querySelector("#ge-mois").value = P.dateRef.slice(0, 7); prev(); }
     catch (err) { box.innerHTML = '<div class="banner crit">' + esc(errMsg(err)) + "</div>"; } });
 }
@@ -1847,11 +1860,16 @@ function geFiche(code, ml) {
   return h + "</div>";
 }
 function geListForm() { const L = GE.mois.slice().sort((a, b) => b.mois.localeCompare(a.mois));
-  const ov = modal("Reportings importés", table([{ h: "Mois", f: m => "<b>" + esc(moisTxt(m.mois)) + "</b>" }, { h: "Période", f: m => fD(m.debut) + " → " + fD(m.fin) }, { h: "Engins", n: 1, f: m => nb(m.nb_engins) }, { h: "Pannes", n: 1, f: m => nb(GE.pan.filter(p => p.mois === m.mois).length) }, { h: "Fichier", f: m => '<span class="muted">' + esc(m.fichier || "") + "</span>" }, { h: "Importé le", f: m => fDT(m.created_at) },
-    { h: "", f: m => '<button type="button" class="btn small danger" data-ge-del="' + m.mois + '">Supprimer</button>' }], L, { empty: "Aucun reporting." }), async () => {}, "Fermer", true);
+  const ov = modal("Reportings importés", table([{ h: "Mois", f: m => "<b>" + esc(moisTxt(m.mois)) + "</b>" }, { h: "Période", f: m => fD(m.debut) + " → " + fD(m.fin) }, { h: "Engins", n: 1, f: m => nb(m.nb_engins) }, { h: "Pannes", n: 1, f: m => nb(GE.pan.filter(p => p.mois === m.mois).length) }, { h: "Fichier", f: m => '<span class="muted">' + esc(m.fichier || "") + "</span>" }, { h: "Copie conservée", f: m => m.fichier_path ? '<span class="pill p-ok">oui</span>' : '<span class="pill p-warn" title="Réimportez ce mois une fois pour conserver le fichier">non</span>' },
+    { h: "Vidanges lues", n: 1, f: m => nb(GE.eng.filter(r => r.mois === m.mois && r.date_vidange).length) }, { h: "Importé le", f: m => fDT(m.created_at) },
+    { h: "", f: m => '<div class="rowact">' + (m.fichier_path ? '<button type="button" class="btn small" data-ge-re="' + m.mois + '">Relire</button><button type="button" class="btn small" data-ge-dl="' + m.mois + '">Fichier</button>' : "") + '<button type="button" class="btn small danger" data-ge-del="' + m.mois + '">Supprimer</button></div>' }], L, { empty: "Aucun reporting." }) +
+    '<div class="actions" style="justify-content:flex-start;margin-top:10px"><button type="button" class="btn primary" data-ge-re="*"' + (L.some(m => m.fichier_path) ? "" : " disabled") + '>Relire tous les fichiers conservés</button><span class="hint">Recalcule les mois à partir des fichiers gardés, sans les recharger. Les mois sans copie doivent être réimportés une fois.</span></div>', async () => {}, "Fermer", true);
   ov.querySelector("#mf-cancel").hidden = true;
-  ov.addEventListener("click", e => { const b = e.target.closest("[data-ge-del]"); if (!b) return; const m = b.dataset.geDel; ov.remove();
-    confirmBox("Supprimer le reporting de " + moisTxt(m) + " (engins, pannes et mouvements de ce mois) ?", async () => { await must(sb.from("rep_mois").delete().eq("mois", m)); await geLoad(true); toast("Reporting de " + moisTxt(m) + " supprimé."); }); }); }
+  ov.addEventListener("click", async e => {
+    const r = e.target.closest("[data-ge-re]"); if (r) { const k = r.dataset.geRe, list = k === "*" ? L.filter(m => m.fichier_path) : L.filter(m => m.mois === k); ov.remove(); toast("Relecture de " + list.length + " fichier(s)…"); return geReread(list); }
+    const d = e.target.closest("[data-ge-dl]"); if (d) { const m = L.find(x => x.mois === d.dataset.geDl); const { data, error } = await sb.storage.from("reporting").download(m.fichier_path); if (error) return toast(errMsg(error)); return saveBlob(data, m.fichier || "reporting.xlsx"); }
+    const b = e.target.closest("[data-ge-del]"); if (!b) return; const m = b.dataset.geDel; ov.remove();
+    confirmBox("Supprimer le reporting de " + moisTxt(m) + " (engins, pannes, mouvements et copie du fichier) ?", async () => { const x = L.find(y => y.mois === m); if (x && x.fichier_path) await sb.storage.from("reporting").remove([x.fichier_path]); await must(sb.from("rep_mois").delete().eq("mois", m)); await geLoad(true); toast("Reporting de " + moisTxt(m) + " supprimé."); }); }); }
 
 /* ---------- actions ---------- */
 document.addEventListener("click", async e => { const b = e.target.closest("[data-act]"); if (!b) return; const a = b.dataset.act, id = b.dataset.id;
