@@ -1685,17 +1685,21 @@ function geLoad(force) {
 const xlDate = v => { if (v === null || v === undefined || v === "") return null; if (typeof v === "number") { if (v < 20000 || v > 80000) return null; return new Date(Math.round((v - 25569) * 864e5)).toISOString().slice(0, 10); }
   const s = String(v).trim(), m = s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/); if (m) return m[3] + "-" + m[2].padStart(2, "0") + "-" + m[1].padStart(2, "0"); return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : null; };
 const xlNum = v => { if (v === null || v === undefined || v === "") return null; const n = typeof v === "number" ? v : +String(v).replace(/\s/g, "").replace(",", "."); return Number.isFinite(n) ? n : null; };
+const xlCpt = v => { const n = xlNum(v); if (n !== null) return n; const m = String(v ?? "").replace(/\s/g, "").match(/\d+(?:[.,]\d+)?/); return m ? +m[0].replace(",", ".") : null; };   /* « 9570h » → 9570 */
 function geParse(wb) {
   const sh = name => { const k = wb.SheetNames.find(n => nh(n) === nh(name)) || wb.SheetNames.find(n => nh(n).includes(nh(name))); return k ? XLSX.utils.sheet_to_json(wb.Sheets[k], { header: 1, raw: true, defval: null }) : null; };
   const R = sh("Reporting"); if (!R) throw new Error("Feuille « Reporting » introuvable dans ce fichier.");
   const hi = R.findIndex(r => r && r.some(c => nh(c) === "code") && r.some(c => nh(c) === "etat")); if (hi < 0) throw new Error("Ligne d'en-tête (Code … Etat) introuvable dans la feuille Reporting.");
   const H = R[hi].map(nh), D = R[hi - 1] || [], col = (...names) => { for (const n of names) { const i = H.indexOf(nh(n)); if (i >= 0) return i; } return -1; };
+  /* colonnes de vidange : titre cherché sur la ligne d'en-tête et les 4 lignes au-dessus (cellules fusionnées), orthographe libre
+     « Date de réalisation du vidange » = date de la vidange ; « Comp de dernière vidange réalisée » = compteur de cette vidange */
+  const colF = (...keys) => { for (let k = hi; k >= Math.max(0, hi - 4); k--) { const row = R[k] || []; for (let i = 0; i < row.length; i++) { const v = nh(row[i]); if (v && keys.every(x => v.includes(x)) && !(keys.includes("dernier") && v.includes("date"))) return i; } } return -1; };
   let dateRef = null; for (let i = 0; i < hi; i++) for (const c of R[i] || []) { const d = xlDate(c); if (d && !dateRef) dateRef = d; }
   const pairs = []; H.forEach((h, i) => { if (h === "etat" && H[i - 1] === "compteur") { const day = xlNum(D[i - 1]) ?? xlNum(D[i]); if (day) pairs.push({ e: i, c: i - 1, day }); } });
   if (!pairs.length) throw new Error("Aucune colonne journalière (Compteur / Etat) trouvée.");
   const C = { code: col("Code"), des: col("Désignation"), fam: col("Libellé_Famille_Engin", "LibelléFamilleEngin"), cat: col("Libellé_Catégorie_Engin"), mar: col("Marque"), typ: col("Type"), ser: col("Serie", "Série"),
     din: col("Date d'entée", "Date d'entrée"), dout: col("Date de sortie"), hm: col("HM CUM"), unite: col("H/KM"), jf: col("JOURS FACTURES"),
-    proch: col("Compteur prochaine vidange"), prog: col("Compteur vidange programmer", "Compteur  vidange programmer"), der: col("Comp de derniere vidange réaliser"), dvid: col("Date de réalisation du vidange") };
+    proch: colF("prochain", "vidange"), prog: colF("programm", "vidange"), der: colF("dernier", "vidange"), dvid: colF("realisation", "vidange") >= 0 ? colF("realisation", "vidange") : colF("date", "vidange") };
   return { R, hi, C, pairs, dateRef, decl: sh("Déclaration Standard des Arrets"), mvt: sh("Mouvement des Engins") };
 }
 function geBuild(P, mois) {
@@ -1714,7 +1718,7 @@ function geBuild(P, mois) {
     eng.push({ mois: mois + "-01", code, designation: str(g(r, C.des)), famille: str(g(r, C.fam)) || str(g(r, C.des)) || "Autre", categorie: str(g(r, C.cat)), marque: str(g(r, C.mar)), type: str(g(r, C.typ)), serie: str(g(r, C.ser)),
       date_entree: xlDate(g(r, C.din)), date_sortie: xlDate(g(r, C.dout)), j_panne: n("P"), j_af: n("AF"), j_anf: n("ANF"), j_m: n("M"), j_tr: n("TR"), j_factures: xlNum(g(r, C.jf)) ?? (n("M") + n("AF")),
       hm: hmV, unite, cpt_debut: cpts.length ? Math.min(...cpts) : null, cpt_fin: cpts.length ? Math.max(...cpts) : null,
-      proch_vidange: xlNum(g(r, C.proch)), vidange_prog: xlNum(g(r, C.prog)), der_vidange: xlNum(g(r, C.der)), date_vidange: xlDate(g(r, C.dvid)), etats: etats.map(x => [x.e, x.c]) }); }
+      proch_vidange: xlCpt(g(r, C.proch)), vidange_prog: xlCpt(g(r, C.prog)), der_vidange: xlCpt(g(r, C.der)), date_vidange: xlDate(g(r, C.dvid)), etats: etats.map(x => [x.e, x.c]) }); }
   const pan = []; if (P.decl) { const hi = P.decl.findIndex(r => r && r.some(c => nh(c).startsWith("codeengin")));
     if (hi >= 0) { const H = P.decl[hi].map(nh), ix = k => H.findIndex(h => h.startsWith(k));
       const ci = ix("codeengin"), di = ix("datedebut"), fi = ix("datefin"), du = ix("duree"), de = ix("description"), da = ix("noda") >= 0 ? ix("noda") : ix("nda");
@@ -1760,7 +1764,7 @@ const geMtbf = a => a.mtbf ? nb(Math.round(a.mtbf)) + " h" : (a.mtbfKm ? nb(Math
 /* pannes distinctes (une panne à cheval sur deux mois n'est comptée qu'une fois) */
 function gePannes(moisL, code) { const seen = new Map(); for (const p of GE.pan) { if (!moisL.includes(p.mois) || (code && p.code !== code)) continue; const k = p.code + "|" + (p.debut || p.description); const o = seen.get(k); if (!o || p.mois > o.mois) seen.set(k, p); } return [...seen.values()]; }
 function geVidanges(moisL, code) { const per = moisL.map(m => GE.mois.find(x => x.mois === m)).filter(Boolean), d1 = per.map(x => x.debut).sort()[0], d2 = per.map(x => x.fin).sort().slice(-1)[0], out = new Map();
-  for (const c of S.hCon.values()) if (c.entretien === "Vidange" && inPeriod(c.date, d1, d2) && (!code || c.engin === code)) out.set(c.engin + "|" + c.date, { code: c.engin, date: c.date, src: "Gestion huiles", huile: c.huile, qte: c.qte });
+  for (const c of S.hCon.values()) if (c.entretien === "Vidange" && inPeriod(c.date, d1, d2) && (!code || c.engin === code)) out.set(c.engin + "|" + c.date, { code: c.engin, date: c.date, src: "Suivi huiles", huile: c.huile, qte: c.qte, cpt: c.compteur });
   for (const r of GE.eng) if (moisL.includes(r.mois) && r.date_vidange && inPeriod(r.date_vidange, d1, d2) && (!code || r.code === code)) { const k = r.code + "|" + r.date_vidange; if (!out.has(k)) out.set(k, { code: r.code, date: r.date_vidange, src: "Reporting", cpt: r.der_vidange }); }
   return { list: [...out.values()].sort((a, b) => (b.date || "").localeCompare(a.date || "")), d1, d2 }; }
 const pct = v => v === null || v === undefined ? "–" : (Math.round(v * 1000) / 10).toLocaleString("fr-FR") + " %";
@@ -1806,6 +1810,10 @@ VIEWS.gengins = { title: "Gestion engins",
     h += '<div class="panel"><h3>Engins les plus immobilisés <small>jours de panne · top 10</small></h3>' + hBars(topP.map(x => ({ label: x.c, labelHtml: mono(x.c) + ' <span class="muted">' + esc(x.d || "") + "</span>", v: x.v })), { fmt: v => nb(v) + " j", empty: "Aucune panne sur la période." }) + "</div>";
     const vf = fams.filter(a => a.vid).map(a => ({ label: a.fam, labelHtml: esc(a.fam), v: a.vid }));
     h += '<div class="panel"><h3>Vidanges réalisées par famille</h3>' + hBars(vf, { fmt: v => nb(v), empty: "Aucune vidange sur la période." }) + "</div></div>";
+    const vm = ml.map(m => { const p = GE.mois.find(x => x.mois === m); return { label: m, labelHtml: esc(moisTxt(m)), v: V.list.filter(v => inPeriod(v.date, p.debut, p.fin)).length }; });
+    h += '<div class="grid2"><div class="panel"><h3>Vidanges réalisées par mois <small>total ' + nb(V.list.length) + "</small></h3>" + hBars(vm, { fmt: v => nb(v), empty: "Aucune vidange." }) + "</div>" +
+      '<div class="panel"><h3>Liste des vidanges réalisées <small>' + nb(V.list.length) + "</small></h3>" + table([{ h: "Date", f: v => fD(v.date) }, { h: "Code", f: v => mono(v.code) }, { h: "Engin", f: v => esc((GE.eng.find(r => r.code === v.code) || {}).designation || "") },
+        { h: "Compteur", n: 1, f: v => v.cpt ? nb(v.cpt) : '<span class="muted">–</span>' }, { h: "Source", f: v => esc(v.src) + (v.huile ? ' <span class="muted">' + esc(v.huile) + "</span>" : "") }], V.list, { empty: "Aucune vidange sur la période.", limit: 500 }) + "</div></div>";
     h += '<div class="panel"><h3>Pannes déclarées <small>' + pans.length + " panne(s) · " + nb(pans.filter(p => p.en_cours).length) + " en cours</small></h3>" + table([{ h: "Code", f: p => mono(p.code) }, { h: "Engin", f: p => esc((GE.eng.find(r => r.code === p.code) || {}).designation || "") },
       { h: "Début", f: p => fD(p.debut) }, { h: "Fin", f: p => p.en_cours ? '<span class="pill p-crit">en cours</span>' : fD(p.fin) }, { h: "Durée", n: 1, f: p => p.duree === null ? "–" : nb(p.duree) + " j" }, { h: "Motif de la panne", f: p => esc(p.description) }, { h: "N° DA", f: p => mono(p.num_da) }],
       pans.slice().sort((a, b) => (b.en_cours - a.en_cours) || N(b.duree) - N(a.duree)), { empty: "Aucune panne déclarée.", limit: 300 }) + "</div>";
