@@ -48,7 +48,7 @@ function catTabs(cur, withAll) {
 const S = {
   view: "dash", uid: null, me: null, role: "", isAdmin: false, canWrite: false, canDA: false, canCreateDA: false, canNumDA: false, lastSeen: null,
   da: new Map(), daL: new Map(), bc: new Map(), bcl: new Map(), bl: new Map(), bll: new Map(), hEnt: new Map(), hSor: new Map(), hCon: new Map(),
-  engins: new Map(), depart: new Map(), entrees: new Map(), sorties: new Map(), profiles: new Map(), journal: [],
+  engins: new Map(), inv: new Map(), depart: new Map(), entrees: new Map(), sorties: new Map(), profiles: new Map(), journal: [],
   params: { nom_chantier: "", types: [], huiles: [], interventions: [], ateliers: [], unites: [], seuil: 1, seuil_pdr: 1 },
   f: { cat: "FILTRE", stockCat: "", depCat: "", stockQ: "", stockSt: "", entQ: "", entSt: "", entFrom: "", entTo: "", sorQ: "", sorFrom: "", sorTo: "", engQ: "", depQ: "", jQ: "", jUser: "", jTab: "", daQ: "", sdaQ: "", sdaFrom: "", sdaTo: "", sbcQ: "", sbcFrom: "", sbcTo: "", sbcSt: "", sdaAll: false, hTab: "", hPer: "annee", hHuile: "", hQ: "", hFrom: "", hTo: "", hLastAt: "" },
   selEngin: "", selRef: "", loaded: false
@@ -116,7 +116,7 @@ const NAV = [
   ["Huiles", [["huiles", "Suivi huiles"]]],
   ["Achats", [["da", "Création DA", "da"], ["suivida", "Suivi DA", "da"], ["suivibc", "Suivi BC", "da"]]],
   ["Recherche", [["engin", "Suivi par engin"], ["ref", "Recherche référence"], ["gamme", "Gamme maintenance prv"]]],
-  ["Référentiel", [["engins", "Engins", true], ["depart", "Stock de départ", true], ["params", "Paramètres", true], ["gparam", "Paramètre gamme", true]]],
+  ["Référentiel", [["engins", "Engins", true], ["inventaire", "Inventaire", true], ["depart", "Stock de départ", true], ["params", "Paramètres", true], ["gparam", "Paramètre gamme", true]]],
   ["Administration", [["users", "Utilisateurs", true], ["compte", "Mon compte"]]]
 ];
 let navHtml = "";
@@ -327,7 +327,7 @@ VIEWS.engins = { title: "Engins",
   tools: () => '<div class="tools">' + searchF("ge-q", S.f.engQ, "Code, désignation, référence…") + '<span class="grow"></span>' + (S.isAdmin ? '<button class="btn primary" data-act="new-engin">+ Nouvel engin</button>' : '<span class="pill p-info">Lecture seule</span>') + "</div>",
   bind() { $("#ge-q").oninput = e => { S.f.engQ = e.target.value; render(); }; },
   body() { const q = norm(S.f.engQ); const r = [...C.engDer.values()].sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true })).filter(e => !q || norm([e.code, e.designation, e.marque, e.modele, e.serie, ...Object.values(e.refs || {})].join(" ")).includes(q));
-    return '<div class="more">' + r.length + " engin(s)</div>" + table([{ h: "Code", f: e => mono(e.code) }, { h: "Désignation", f: e => esc(e.designation) }, { h: "Marque", f: e => esc(e.marque) }, { h: "Modèle", f: e => esc(e.modele) }, { h: "N° série", f: e => esc(e.serie) },
+    return '<div class="more">' + r.length + " engin(s) dans la nomenclature (tous les engins passés sur le projet) · " + r.filter(e => S.inv.has(e.code)).length + " actuellement sur le chantier (Inventaire)</div>" + table([{ h: "Code", f: e => mono(e.code) }, { h: "Inventaire", f: e => S.inv.has(e.code) ? '<span class="pill p-ok">Sur chantier</span>' : '<span class="pill p-info">Sorti</span>' }, { h: "Désignation", f: e => esc(e.designation) }, { h: "Marque", f: e => esc(e.marque) }, { h: "Modèle", f: e => esc(e.modele) }, { h: "N° série", f: e => esc(e.serie) },
       { h: "Unité", f: e => esc(e.unite) }, { h: "Intervalle", n: 1, f: e => nb(e.intervalle) }, { h: "Huile", f: e => mono(e.refs.huile) }, { h: "Gasoil", f: e => mono(e.refs.gasoil) }, { h: "Air prim.", f: e => mono(e.refs.airP) }, { h: "Hydraul.", f: e => mono(e.refs.hydraulique) },
       { h: "Dern. vidange", f: e => fD(e.lastVid) }, { h: "Proch. vidange", n: 1, f: e => nb(e.next) }, { h: "", f: e => S.isAdmin ? '<div class="rowact"><button class="btn small" data-act="edit-engin" data-id="' + esc(e.code) + '">Modifier</button></div>' : "" }], r, { empty: "Aucun engin." }); } };
 
@@ -1994,6 +1994,60 @@ function geListForm() { const L = GE.mois.slice().sort((a, b) => b.mois.localeCo
     const b = e.target.closest("[data-ge-del]"); if (!b) return; const m = b.dataset.geDel; ov.remove();
     confirmBox("Supprimer le reporting de " + moisTxt(m) + " (engins, pannes, mouvements et copie du fichier) ?", async () => { const x = L.find(y => y.mois === m); if (x && x.fichier_path) await sb.storage.from("reporting").remove([x.fichier_path]); await must(sb.from("rep_mois").delete().eq("mois", m)); await geLoad(true); toast("Reporting de " + moisTxt(m) + " supprimé."); }); }); }
 
+/* ---------- Inventaire : engins actuellement sur le chantier (la feuille Engins garde la nomenclature de tous les engins passés sur le projet) ---------- */
+const mapINV = r => ({ code: String(r.code), chantier: r.chantier || "", famille: r.famille || "", gamme: r.gamme || "", categorie: r.categorie || "", marque: r.marque || "", type: r.type || "", serie: r.serie || "", dateEntree: r.date_entree, obs: r.obs || "" });
+const invRow = o => ({ code: o.code, chantier: o.chantier || S.params.nom_chantier || null, famille: o.famille || null, gamme: o.gamme || null, categorie: o.categorie || null, marque: o.marque || null, type: o.type || null, serie: o.serie || null, date_entree: o.dateEntree || null, obs: o.obs || null });
+const invMatch = (o, q) => !q || norm([o.code, o.famille, o.gamme, o.categorie, o.marque, o.type, o.serie].join(" ")).includes(q);
+const INV_TABLE = r => table([{ h: "Code", f: o => mono(o.code) }, { h: "Famille", f: o => esc(o.famille) }, { h: "Gamme", f: o => esc(o.gamme) }, { h: "Catégorie", f: o => esc(o.categorie) }, { h: "Marque", f: o => esc(o.marque) }, { h: "Type", f: o => esc(o.type) }, { h: "N° série", f: o => '<span style="font-size:12px">' + esc(o.serie) + "</span>" },
+      { h: "Date d'entrée", f: o => fD(o.dateEntree) }, { h: "", f: o => S.isAdmin ? '<div class="rowact"><button class="btn small" data-act="inv-edit" data-id="' + esc(o.code) + '">Modifier</button><button class="btn small danger" data-act="inv-del" data-id="' + esc(o.code) + '" title="L\'engin a quitté le chantier : il reste dans la nomenclature Engins">Sortir</button></div>' : "" }], r, { empty: "Aucun engin.", limit: 500 });
+VIEWS.inventaire = { title: "Inventaire",
+  tools: () => '<div class="tools">' + searchF("inv-q", S.f.invQ, "Code, famille, marque, type, série…") + field("inv-fam", "Famille", '<select id="inv-fam"><option value="">Toutes</option>' + [...new Set([...S.inv.values()].map(o => o.famille).filter(Boolean))].sort().map(f => "<option" + (f === S.f.invFam ? " selected" : "") + ">" + esc(f) + "</option>").join("") + "</select>") +
+    '<span class="grow"></span><button class="btn" data-act="inv-xls">Exporter Excel</button>' + (S.isAdmin ? '<button class="btn" data-act="inv-imp">Importer l\'inventaire (Excel)</button><button class="btn primary" data-act="inv-new">+ Ajouter un engin</button>' : "") + "</div>",
+  bind() { $("#inv-q").oninput = e => { S.f.invQ = e.target.value; render(); }; $("#inv-fam").onchange = e => { S.f.invFam = e.target.value; render(); }; },
+  rows() { const q = norm(S.f.invQ || ""); return [...S.inv.values()].filter(o => (!S.f.invFam || o.famille === S.f.invFam) && invMatch(o, q)).sort((a, b) => a.famille.localeCompare(b.famille) || a.code.localeCompare(b.code, undefined, { numeric: true })); },
+  body() { const r = this.rows(), all = [...S.inv.values()], fams = [...new Set(all.map(o => o.famille || "Autre"))].map(f => ({ label: f, labelHtml: esc(f), v: all.filter(o => (o.famille || "Autre") === f).length })).sort((a, b) => b.v - a.v);
+    const sansFiche = all.filter(o => !S.engins.has(o.code)).length;
+    let h = '<div class="kpis">' + kpi("Engins sur le chantier", nb(all.length), "acc") + kpi("Familles", nb(fams.length)) + kpi("Entrés ce mois-ci", nb(all.filter(o => (o.dateEntree || "").slice(0, 7) === today().slice(0, 7)).length)) + kpi("Engins passés sur le projet (nomenclature)", nb(S.engins.size), "txt") + "</div>";
+    if (sansFiche) h += '<div class="banner crit">' + sansFiche + " engin(s) de l'inventaire n'ont pas de fiche dans Engins.</div>";
+    h += '<div class="panel"><h3>Liste <small>' + r.length + " engin(s)</small></h3>" + INV_TABLE(r) + "</div>";
+    h += '<div class="panel"><h3>Engins par famille</h3>' + hBars(fams, { fmt: v => nb(v) }) + "</div>";
+
+    return h; } };
+function invForm(o) { const isNew = !o; o = o || { code: "", famille: "", gamme: "", categorie: "", marque: "", type: "", serie: "", dateEntree: today(), obs: "" };
+  const fams = [...new Set([...S.inv.values()].map(x => x.famille).filter(Boolean))].sort(), gams = [...new Set([...S.inv.values()].map(x => x.gamme).filter(Boolean))].sort();
+  modal(isNew ? "Ajouter un engin à l'inventaire" : "Modifier – engin " + o.code, '<div class="fgrid">' + F("iv-code", "Code engin *", '<input id="iv-code" value="' + esc(o.code) + '"' + (isNew ? "" : " readonly") + ' list="dl-engins">') + F("iv-date", "Date d'entrée", '<input id="iv-date" type="date" value="' + esc(o.dateEntree || "") + '">') +
+    F("iv-fam", "Famille", '<input id="iv-fam" list="dl-iv-fam" value="' + esc(o.famille) + '"><datalist id="dl-iv-fam">' + fams.map(f => '<option value="' + esc(f) + '">').join("") + "</datalist>") + F("iv-gam", "Gamme", '<input id="iv-gam" list="dl-iv-gam" value="' + esc(o.gamme) + '"><datalist id="dl-iv-gam">' + gams.map(f => '<option value="' + esc(f) + '">').join("") + "</datalist>") +
+    F("iv-cat", "Catégorie", '<input id="iv-cat" value="' + esc(o.categorie) + '">') + F("iv-mar", "Marque", '<input id="iv-mar" value="' + esc(o.marque) + '">') + F("iv-typ", "Type", '<input id="iv-typ" value="' + esc(o.type) + '">') + F("iv-ser", "N° de série", '<input id="iv-ser" value="' + esc(o.serie) + '">') + "</div>" +
+    (isNew ? '<p class="hint">Si le code n\'existe pas dans Engins, sa fiche y est créée automatiquement (nomenclature).</p>' : ""),
+    async ov => { const code = fv(ov, "iv-code"); if (!/^\d{3,7}$/.test(code)) return "Code engin invalide."; if (isNew && S.inv.has(code)) return "Cet engin est déjà dans l'inventaire.";
+      const x = { code, famille: fv(ov, "iv-fam"), gamme: fv(ov, "iv-gam"), categorie: fv(ov, "iv-cat"), marque: fv(ov, "iv-mar"), type: fv(ov, "iv-typ"), serie: fv(ov, "iv-ser"), dateEntree: fv(ov, "iv-date") || null, chantier: o.chantier };
+      const r = isNew ? await must(sb.from("inventaire").insert(invRow(x)).select().single()) : (await must(sb.from("inventaire").update(Object.assign(invRow(x), { updated_at: new Date().toISOString(), updated_by: S.uid })).eq("code", code).select()))[0];
+      S.inv.set(code, mapINV(r)); await invEnsureEngins([x]); schedule(); toast("Engin " + code + (isNew ? " ajouté à l'inventaire." : " modifié.")); }, "Enregistrer"); }
+/* chaque engin de l'inventaire doit exister dans la nomenclature Engins */
+async function invEnsureEngins(list) { const miss = list.filter(x => !S.engins.has(x.code)); if (!miss.length) return 0;
+  const rows = await must(sb.from("engins").insert(miss.map(x => ({ code: x.code, designation: x.famille || x.gamme || null, marque: x.marque || null, modele: x.type || null, serie: x.serie || null }))).select());
+  rows.forEach(r => S.engins.set(String(r.code), mapG(r))); return rows.length; }
+function invImportForm() {
+  let L = null;
+  const ov = modal("Importer l'inventaire (Excel)", '<p class="muted" style="margin-top:0">Fichier avec les colonnes CODE, FAMILLE_ENGIN, GAMME_ENGIN, CATEGORIE, MARQUE, TYPE, SERIE, DATE ENTREE. L\'inventaire actuel est <b>remplacé</b> par ce fichier : les engins absents du fichier quittent l\'inventaire mais restent dans la nomenclature Engins.</p>' +
+    F("iv-file", "Fichier Excel *", '<input id="iv-file" type="file" accept=".xlsx,.xls">') + '<div id="iv-prev"></div>',
+    async () => { if (!L || !L.length) return "Choisissez un fichier valide.";
+      const old = [...S.inv.keys()].filter(c => !L.some(x => x.code === c));
+      if (old.length) for (let i = 0; i < old.length; i += 100) await must(sb.from("inventaire").delete().in("code", old.slice(i, i + 100)).select("code"));
+      const up = await must(sb.from("inventaire").upsert(L.map(invRow)).select()); S.inv = new Map(up.map(r => [String(r.code), mapINV(r)]));
+      const nE = await invEnsureEngins(L); schedule(); toast("Inventaire importé : " + up.length + " engin(s)" + (old.length ? ", " + old.length + " sorti(s) de l'inventaire" : "") + (nE ? ", " + nE + " fiche(s) créée(s) dans Engins" : "") + "."); }, "Remplacer l'inventaire", true);
+  ov.querySelector("#iv-file").addEventListener("change", async e => { const f = e.target.files[0], box = ov.querySelector("#iv-prev"); L = null; box.innerHTML = ""; if (!f) return;
+    try { const wb = XLSX.read(await f.arrayBuffer(), { type: "array" }), R = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: null });
+      const hi = R.findIndex(r => r && r.some(c => nh(c) === "code")); if (hi < 0) throw new Error("Colonne CODE introuvable.");
+      const H = R[hi].map(nh), c = (...k) => { for (const x of k) { const i = H.findIndex(h => h === nh(x) || h.startsWith(nh(x))); if (i >= 0) return i; } return -1; }, s = v => v === null || v === undefined ? "" : String(v).trim();
+      const ix = { code: c("code"), fam: c("famille_engin", "famille"), gam: c("gamme_engin", "gamme"), cat: c("categorie"), mar: c("marque"), typ: c("type"), ser: c("serie", "série"), dat: c("date entree", "dateentree", "date"), ch: c("chantier") };
+      const seen = new Set(); L = [];
+      for (const r of R.slice(hi + 1)) { if (!r) continue; const code = s(r[ix.code]); if (!/^\d{3,7}$/.test(code) || seen.has(code)) continue; seen.add(code);
+        L.push({ code, chantier: s(r[ix.ch]) || null, famille: s(r[ix.fam]), gamme: s(r[ix.gam]), categorie: s(r[ix.cat]), marque: s(r[ix.mar]), type: s(r[ix.typ]), serie: s(r[ix.ser]), dateEntree: xlDate(r[ix.dat]) }); }
+      const neu = L.filter(x => !S.inv.has(x.code)).length, out = [...S.inv.keys()].filter(k => !seen.has(k)).length, noE = L.filter(x => !S.engins.has(x.code)).length;
+      box.innerHTML = '<div class="banner ok">Lu : <b>' + L.length + "</b> engins · " + neu + " nouveau(x) · " + out + " sortiront de l'inventaire · " + noE + " fiche(s) à créer dans Engins.</div>"; }
+    catch (err) { box.innerHTML = '<div class="banner crit">' + esc(errMsg(err)) + "</div>"; } }); }
+
 /* ---------- actions ---------- */
 document.addEventListener("click", async e => { const b = e.target.closest("[data-act]"); if (!b) return; const a = b.dataset.act, id = b.dataset.id;
   try {
@@ -2003,6 +2057,11 @@ document.addEventListener("click", async e => { const b = e.target.closest("[dat
     if (a === "h-new-sor") return hSorForm(null);
     if (a === "h-new-con") return hConForm(null);
     if (a === "gm-go") return gammeGo();
+    if (a === "inv-new") return S.isAdmin && invForm(null);
+    if (a === "inv-edit") return S.isAdmin && invForm(S.inv.get(id));
+    if (a === "inv-imp") return S.isAdmin && invImportForm();
+    if (a === "inv-del") { const o = S.inv.get(id); if (!S.isAdmin || !o) return; return confirmBox("Sortir l'engin " + id + " de l'inventaire (il a quitté le chantier) ? Sa fiche reste dans Engins.", async () => { await must(sb.from("inventaire").delete().eq("code", id).select("code")); S.inv.delete(id); schedule(); toast("Engin " + id + " sorti de l'inventaire."); }); }
+    if (a === "inv-xls") return xls("Inventaire_" + today() + ".xlsx", "Inventaire", VIEWS.inventaire.rows().map(o => ({ "Code": o.code, "Famille": o.famille, "Gamme": o.gamme, "Catégorie": o.categorie, "Marque": o.marque, "Type": o.type, "N° série": o.serie, "Date d'entrée": fD(o.dateEntree) })));
     if (a === "ge-add") return S.isAdmin && geImportForm();
     if (a === "ge-list") return S.isAdmin && geListForm();
     if (a === "ge-cumul") { const L = GE.mois.map(x => x.mois).sort(); S.f.geFrom = L[0]; S.f.geTo = L[L.length - 1]; return render(); }
@@ -2127,6 +2186,7 @@ async function startApp() {
   S.engins = new Map(eng.map(r => [String(r.code), mapG(r)])); S.depart = new Map(dep.map(r => [r.id, mapD(r)])); S.entrees = new Map(ent.map(r => [r.id, mapE(r)])); S.sorties = new Map(sor.map(r => [r.id, mapS(r)]));
   if (par) S.params = Object.assign(S.params, par); S.journal = jr; applyHeader();
   { const [he, hs, hc] = await Promise.all([fetchAll("huile_entrees", "id"), fetchAll("huile_sorties", "id"), fetchAll("huile_conso", "id")]);
+    S.inv = new Map((await fetchAll("inventaire", "code").catch(() => [])).map(r => [String(r.code), mapINV(r)]));
     S.hEnt = new Map(he.map(r => [r.id, mapHE(r)])); S.hSor = new Map(hs.map(r => [r.id, mapHS(r)])); S.hCon = new Map(hc.map(r => [r.id, mapHC(r)])); }
   if (S.canDA) { const [da, dl] = await Promise.all([fetchAll("da", "id"), fetchAll("da_lignes", "id")]); S.da = new Map(da.map(r => [r.id, mapDA(r)])); S.daL = new Map(dl.map(r => [r.id, mapDL(r)]));
     const [bc, bcl, bl, bll] = await Promise.all(["bc", "bc_lignes", "bl", "bl_lignes"].map(t => fetchAll(t, "id")));
