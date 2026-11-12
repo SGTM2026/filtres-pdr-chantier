@@ -186,10 +186,13 @@ tr.row-err td{background:var(--crit-soft)}
 .gstack i{display:block;height:100%}
 .glegend{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:var(--muted);margin:2px 0 10px}
 .glegend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:-1px;border:1px solid var(--line)}
-.gtrend{width:100%;height:auto;max-height:260px}
+.gtrend{width:100%;height:auto;max-height:230px;max-width:900px}
 .gtrend .grid{stroke:var(--line);stroke-width:1}
 .gtrend text{font-size:11px;fill:var(--muted)}
 .gcal{display:flex;flex-wrap:wrap;gap:2px;align-items:center;margin:4px 0}
 .gcal-m{width:120px;font-size:12px;font-weight:600;flex:none}
 .gcal i{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:4px;font-style:normal;font-size:10px;color:#fff;border:1px solid var(--line);font-variant-numeric:tabular-nums}
 @media (max-width:640px){.gcal-m{width:100%}}
+.gsecbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.gsec-n{display:inline-block;margin-left:4px;padding:0 6px;border-radius:9px;background:var(--surface2);color:var(--muted);font-size:11px;font-weight:600}
+.btn.primary .gsec-n{background:rgba(255,255,255,.25);color:#fff}

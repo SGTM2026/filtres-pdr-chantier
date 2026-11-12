@@ -1212,6 +1212,7 @@ function hAtelierConsoPanel(f, to) {
     { h: "Interventions", n: 1, f: r => nb(r.n) }, { h: "Vidange", n: 1, f: r => nb(r.vid) }, { h: "Fuite", n: 1, f: r => r.fui ? '<span class="reste">' + nb(r.fui) + "</span>" : "0" }, { h: "Remise à niveau", n: 1, f: r => nb(r.niv) }, { h: "Engins servis", n: 1, f: r => nb(r.eng) }], rows);
   return h + "</div>";
 }
+document.addEventListener("change", e => { if (e.target.id === "ge-fam") { S.f.geFam = e.target.value; render(); } });
 document.addEventListener("change", e => { if (e.target.id === "hd-at-h") { S.f.hdAtH = e.target.value; render(); } });
 
 /* ---------- rapports PDF / Excel ---------- */
@@ -1813,25 +1814,53 @@ VIEWS.gengins = { title: "Gestion engins",
       [...new Set(GE.eng.map(r => r.code))].sort().map(c => '<option value="' + esc(c) + '">' + esc((GE.eng.find(r => r.code === c) || {}).designation || "") + "</option>").join("") + '</datalist><button class="btn primary small" data-act="ge-code">Rechercher</button>' + (S.f.geCode ? '<button class="btn small" data-act="ge-code-x">Fermer la fiche</button>' : "") + "</div>" + (S.f.geCode ? geFiche(S.f.geCode, ml) : "") + "</div>";
     /* familles */
     const fams = [...new Set(rows.map(r => r.famille || "Autre"))].map(f => { const R = rows.filter(r => (r.famille || "Autre") === f), cs = new Set(R.map(r => r.code)); const a = geAgg(R, pans.filter(p => cs.has(p.code))); a.fam = f; a.n = cs.size; a.vid = V.list.filter(v => cs.has(v.code)).length; return a; }).sort((a, b) => b.n - a.n || a.fam.localeCompare(b.fam));
-    h += '<div class="panel"><h3>Taux par famille d\'engins <small>' + fams.length + " familles</small></h3>" + geLegend() + table([{ h: "Famille", f: a => "<b>" + esc(a.fam) + "</b>" }, { h: "Engins", n: 1, f: a => nb(a.n) }, { h: "Répartition des jours", f: a => geStack(a) },
-      { h: "Disponibilité", n: 1, f: a => '<b class="' + (a.dispo !== null && a.dispo < .85 ? "reste" : "") + '">' + pct(a.dispo) + "</b>" }, { h: "Exploitation", n: 1, f: a => pct(a.expl) }, { h: "Panne", n: 1, f: a => a.panne ? '<span class="' + (a.panne > .1 ? "reste" : "") + '">' + pct(a.panne) + "</span>" : "0 %" },
-      { h: "Heures / km", n: 1, f: a => (a.hm ? nb(Math.round(a.hm)) + " h" : "") + (a.hm && a.km ? "<br>" : "") + (a.km ? nb(Math.round(a.km)) + " km" : "") || "0" }, { h: "Pannes", n: 1, f: a => nb(a.np) }, { h: "MTBF", n: 1, f: a => geMtbf(a) === "–" ? '<span class="muted">–</span>' : geMtbf(a) }, { h: "MTTR (j)", n: 1, f: a => a.mttr === null ? '<span class="muted">–</span>' : nb(Math.round(a.mttr * 10) / 10) },
-      { h: "Vidanges", n: 1, f: a => nb(a.vid) }], fams, { limit: 200 }) + "</div>";
-    h += '<div class="grid2">';
+    /* recherche par famille */
+    const famL = fams.map(a => a.fam).sort((a, b) => a.localeCompare(b)); if (S.f.geFam && !famL.includes(S.f.geFam)) S.f.geFam = "";
+    h += '<div class="panel"><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><h3 style="margin:0">Recherche par famille engin</h3><span class="grow"></span><select id="ge-fam" style="width:auto;min-width:260px"><option value="">– choisir une famille –</option>' +
+      famL.map(f => "<option" + (f === S.f.geFam ? " selected" : "") + ">" + esc(f) + "</option>").join("") + "</select>" + (S.f.geFam ? '<button class="btn small" data-act="ge-fam-x">Fermer</button>' : "") + "</div>" + (S.f.geFam ? geFamille(S.f.geFam, ml, rows, pans, V) : "") + "</div>";
     if (ml.length > 1) h += '<div class="panel"><h3>Évolution mensuelle des taux</h3>' + geTrend(ml) + "</div>";
-    const topP = [...codes].map(c => { const R = rows.filter(r => r.code === c); return { c, v: R.reduce((t, r) => t + N(r.j_panne), 0), d: (R[0] || {}).designation }; }).filter(x => x.v > 0).sort((a, b) => b.v - a.v).slice(0, 10);
-    h += '<div class="panel"><h3>Engins les plus immobilisés <small>jours de panne · top 10</small></h3>' + hBars(topP.map(x => ({ label: x.c, labelHtml: mono(x.c) + ' <span class="muted">' + esc(x.d || "") + "</span>", v: x.v })), { fmt: v => nb(v) + " j", empty: "Aucune panne sur la période." }) + "</div>";
-    const vf = fams.filter(a => a.vid).map(a => ({ label: a.fam, labelHtml: esc(a.fam), v: a.vid }));
-    h += '<div class="panel"><h3>Vidanges réalisées par famille</h3>' + hBars(vf, { fmt: v => nb(v), empty: "Aucune vidange sur la période." }) + "</div></div>";
-    const vm = ml.map(m => { const p = GE.mois.find(x => x.mois === m); return { label: m, labelHtml: esc(moisTxt(m)), v: V.list.filter(v => inPeriod(v.date, p.debut, p.fin)).length }; });
-    h += '<div class="grid2"><div class="panel"><h3>Vidanges réalisées par mois <small>total ' + nb(V.list.length) + "</small></h3>" + hBars(vm, { fmt: v => nb(v), empty: "Aucune vidange." }) + "</div>" +
-      '<div class="panel"><h3>Liste des vidanges réalisées <small>' + nb(V.list.length) + "</small></h3>" + table([{ h: "Date", f: v => fD(v.date) }, { h: "Code", f: v => mono(v.code) }, { h: "Engin", f: v => esc((GE.eng.find(r => r.code === v.code) || {}).designation || "") },
-        { h: "Compteur", n: 1, f: v => v.cpt ? nb(v.cpt) : '<span class="muted">–</span>' }, { h: "Source", f: v => esc(v.src) + (v.huile ? ' <span class="muted">' + esc(v.huile) + "</span>" : "") }], V.list, { empty: "Aucune vidange sur la période.", limit: 500 }) + "</div></div>";
-    h += '<div class="panel"><h3>Pannes déclarées <small>' + pans.length + " panne(s) · " + nb(pans.filter(p => p.en_cours).length) + " en cours</small></h3>" + table([{ h: "Code", f: p => mono(p.code) }, { h: "Engin", f: p => esc((GE.eng.find(r => r.code === p.code) || {}).designation || "") },
-      { h: "Début", f: p => fD(p.debut) }, { h: "Fin", f: p => p.en_cours ? '<span class="pill p-crit">en cours</span>' : fD(p.fin) }, { h: "Durée", n: 1, f: p => p.duree === null ? "–" : nb(p.duree) + " j" }, { h: "Motif de la panne", f: p => esc(p.description) }, { h: "N° DA", f: p => mono(p.num_da) }],
-      pans.slice().sort((a, b) => (b.en_cours - a.en_cours) || N(b.duree) - N(a.duree)), { empty: "Aucune panne déclarée.", limit: 300 }) + "</div>";
-    const mvK = new Set(), mv = GE.mvt.filter(v => ml.includes(v.mois)).filter(v => { const k = v.code + "|" + v.date_sortie; if (mvK.has(k)) return false; mvK.add(k); return true; }); if (mv.length) h += '<div class="panel"><h3>Mouvements des engins <small>transferts inter-chantiers</small></h3>' + table([{ h: "Code", f: v => mono(v.code) }, { h: "Engin", f: v => esc(v.description) }, { h: "Entrée", f: v => fD(v.date_entree) }, { h: "Sortie", f: v => fD(v.date_sortie) }, { h: "Destination", f: v => esc(v.destination) }], mv) + "</div>";
+    /* sections détaillées : masquées par défaut, affichées par les boutons */
+    const open = S.f.geOpen || (S.f.geOpen = {}), mvK = new Set(), mv = GE.mvt.filter(v => ml.includes(v.mois)).filter(v => { const k = v.code + "|" + v.date_sortie; if (mvK.has(k)) return false; mvK.add(k); return true; });
+    const SEC = [
+      ["fam", "Taux par famille d'engins", fams.length + " familles", () => geLegend() + table([{ h: "Famille", f: a => '<a href="#" data-act="ge-fam-go" data-id="' + esc(a.fam) + '"><b>' + esc(a.fam) + "</b></a>" }, { h: "Engins", n: 1, f: a => nb(a.n) }, { h: "Répartition des jours", f: a => geStack(a) },
+        { h: "Disponibilité", n: 1, f: a => '<b class="' + (a.dispo !== null && a.dispo < .85 ? "reste" : "") + '">' + pct(a.dispo) + "</b>" }, { h: "Exploitation", n: 1, f: a => pct(a.expl) }, { h: "Panne", n: 1, f: a => a.panne ? '<span class="' + (a.panne > .1 ? "reste" : "") + '">' + pct(a.panne) + "</span>" : "0 %" },
+        { h: "Heures / km", n: 1, f: a => (a.hm ? nb(Math.round(a.hm)) + " h" : "") + (a.hm && a.km ? "<br>" : "") + (a.km ? nb(Math.round(a.km)) + " km" : "") || "0" }, { h: "Pannes", n: 1, f: a => nb(a.np) }, { h: "MTBF", n: 1, f: a => geMtbf(a) === "–" ? '<span class="muted">–</span>' : geMtbf(a) }, { h: "MTTR (j)", n: 1, f: a => a.mttr === null ? '<span class="muted">–</span>' : nb(Math.round(a.mttr * 10) / 10) },
+        { h: "Vidanges", n: 1, f: a => nb(a.vid) }], fams, { limit: 200 })],
+      ["imm", "Engins les plus immobilisés", "jours de panne · top 10", () => { const topP = [...codes].map(c => { const R = rows.filter(r => r.code === c); return { c, v: R.reduce((t, r) => t + N(r.j_panne), 0), d: (R[0] || {}).designation }; }).filter(x => x.v > 0).sort((a, b) => b.v - a.v).slice(0, 10);
+        return hBars(topP.map(x => ({ label: x.c, labelHtml: mono(x.c) + ' <span class="muted">' + esc(x.d || "") + "</span>", v: x.v })), { fmt: v => nb(v) + " j", empty: "Aucune panne sur la période." }); }],
+      ["vfam", "Vidanges réalisées par famille", "", () => hBars(fams.filter(a => a.vid).map(a => ({ label: a.fam, labelHtml: esc(a.fam), v: a.vid })), { fmt: v => nb(v), empty: "Aucune vidange sur la période." })],
+      ["vmois", "Vidanges réalisées par mois", "total " + nb(V.list.length), () => hBars(ml.map(m => { const p = GE.mois.find(x => x.mois === m); return { label: m, labelHtml: esc(moisTxt(m)), v: V.list.filter(v => inPeriod(v.date, p.debut, p.fin)).length }; }), { fmt: v => nb(v), empty: "Aucune vidange." })],
+      ["vlist", "Liste des vidanges réalisées", nb(V.list.length), () => table([{ h: "Date", f: v => fD(v.date) }, { h: "Code", f: v => mono(v.code) }, { h: "Engin", f: v => esc((GE.eng.find(r => r.code === v.code) || {}).designation || "") },
+        { h: "Compteur", n: 1, f: v => v.cpt ? nb(v.cpt) : '<span class="muted">–</span>' }, { h: "Source", f: v => esc(v.src) + (v.huile ? ' <span class="muted">' + esc(v.huile) + "</span>" : "") }], V.list, { empty: "Aucune vidange sur la période.", limit: 500 })],
+      ["pan", "Pannes déclarées", pans.length + " panne(s) · " + nb(pans.filter(p => p.en_cours).length) + " en cours", () => table([{ h: "Code", f: p => mono(p.code) }, { h: "Engin", f: p => esc((GE.eng.find(r => r.code === p.code) || {}).designation || "") },
+        { h: "Début", f: p => fD(p.debut) }, { h: "Fin", f: p => p.en_cours ? '<span class="pill p-crit">en cours</span>' : fD(p.fin) }, { h: "Durée", n: 1, f: p => p.duree === null ? "–" : nb(p.duree) + " j" }, { h: "Motif de la panne", f: p => esc(p.description) }, { h: "N° DA", f: p => mono(p.num_da) }],
+        pans.slice().sort((a, b) => (b.en_cours - a.en_cours) || N(b.duree) - N(a.duree)), { empty: "Aucune panne déclarée.", limit: 300 })],
+      ["mvt", "Mouvements des engins", mv.length + " transfert(s)", () => table([{ h: "Code", f: v => mono(v.code) }, { h: "Engin", f: v => esc(v.description) }, { h: "Entrée", f: v => fD(v.date_entree) }, { h: "Sortie", f: v => fD(v.date_sortie) }, { h: "Destination", f: v => esc(v.destination) }], mv, { empty: "Aucun mouvement sur la période." })]];
+    const nOpen = SEC.filter(x => open[x[0]]).length;
+    h += '<div class="panel gsecbar"><span class="muted" style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-right:4px">Afficher :</span>' + SEC.map(([k, t, sm]) => '<button type="button" class="btn small' + (open[k] ? " primary" : "") + '" data-act="ge-sec" data-id="' + k + '" aria-pressed="' + !!open[k] + '">' + (open[k] ? "▾ " : "▸ ") + esc(t) + (sm ? ' <span class="gsec-n">' + esc(sm.split(" · ")[0]) + "</span>" : "") + "</button>").join("") +
+      '<span class="grow"></span><button type="button" class="btn small" data-act="ge-sec-all" data-id="' + (nOpen === SEC.length ? "0" : "1") + '">' + (nOpen === SEC.length ? "Tout masquer" : "Tout afficher") + "</button></div>";
+    for (const [k, t, sm, fn] of SEC) if (open[k]) h += '<div class="panel" id="ge-sec-' + k + '"><div style="display:flex;align-items:center;gap:10px"><h3 style="margin:0">' + esc(t) + (sm ? " <small>" + esc(sm) + "</small>" : "") + '</h3><span class="grow"></span><button type="button" class="btn small" data-act="ge-sec" data-id="' + k + '">Masquer</button></div><div style="margin-top:10px">' + fn() + "</div></div>";
     return h + '<p class="hint">Base des taux = jours de marche + arrêt facturé + arrêt non facturé + panne (jours de transfert exclus). Disponibilité = (base − panne) ÷ base ; Exploitation = marche ÷ base ; Panne = panne ÷ base. MTBF = heures de marche ÷ nombre de pannes déclarées (en km pour les véhicules : compteur en km, ou plus de 744 unités dans le mois) ; MTTR = jours de panne ÷ nombre de pannes. Vidanges = consommations « Vidange » de Gestion huiles + date de vidange du reporting, sans doublon.</p>'; } };
+/* fiche d'une famille d'engins sur la période */
+function geFamille(fam, ml, rowsAll, pansAll, Vall) {
+  const R = rowsAll.filter(r => (r.famille || "Autre") === fam), cs = new Set(R.map(r => r.code)), pans = pansAll.filter(p => cs.has(p.code)), A = geAgg(R, pans), vid = Vall.list.filter(v => cs.has(v.code)), d1 = Vall.d1, d2 = Vall.d2;
+  const oil = [...S.hCon.values()].filter(c => cs.has(c.engin) && inPeriod(c.date, d1, d2)), oilAll = [...S.hCon.values()].filter(c => cs.has(c.engin));
+  const eng = [...cs].map(c => { const X = R.filter(r => r.code === c), a = geAgg(X, pans.filter(p => p.code === c)), l = X[X.length - 1] || {}; a.code = c; a.des = l.designation; a.marque = l.marque; a.type = l.type; a.km = geKm(l); a.vid = vid.filter(v => v.code === c).length; a.oil = oil.filter(o => o.engin === c).reduce((t, o) => t + o.qte, 0); return a; })
+    .sort((a, b) => (b.P - a.P) || a.code.localeCompare(b.code));
+  let h = '<div style="margin-top:12px"><div class="card-head"><span class="code" style="font-size:24px">' + esc(fam) + '</span><span class="desc">' + cs.size + " engin(s)</span></div>";
+  h += '<div class="kpis">' + kpi("Disponibilité", pct(A.dispo), A.dispo !== null && A.dispo < .85 ? "warn" : "") + kpi("Exploitation", pct(A.expl), "acc") + kpi("Taux de panne", pct(A.panne), A.panne > .1 ? "crit" : "") + kpi("MTBF", geMtbf(A), "txt") + kpi("MTTR", A.mttr === null ? "–" : nb(Math.round(A.mttr * 10) / 10) + " j", "txt") +
+    kpi("Pannes déclarées", nb(A.np), A.np ? "crit" : "") + kpi("Jours en panne", nb(A.P), A.P ? "crit" : "") + (A.hm ? kpi("Heures de marche", nb(Math.round(A.hm)) + " h", "txt") : "") + (A.km ? kpi("Km parcourus", nb(Math.round(A.km)) + " km", "txt") : "") +
+    kpi("Vidanges réalisées", nb(vid.length)) + kpi("Huile consommée (période)", L_(oil.reduce((t, c) => t + c.qte, 0)), "txt") + kpi("Huile consommée (toutes dates)", L_(oilAll.reduce((t, c) => t + c.qte, 0)), "txt") + "</div>";
+  h += geLegend() + '<div style="margin-bottom:12px">' + geStack(A) + "</div>";
+  if (ml.length > 1) { const pts = ml.map(m => { const a = geAgg(R.filter(r => r.mois === m), []); return { label: m, labelHtml: esc(moisTxt(m)), v: a.dispo === null ? 0 : Math.round(a.dispo * 1000) / 10 }; });
+    h += "<h4>Disponibilité mois par mois</h4>" + hBars(pts, { fmt: v => nb(v) + " %" }); }
+  h += "<h4>Engins de la famille</h4>" + table([{ h: "Code", f: a => '<a href="#" data-act="ge-code-go" data-id="' + esc(a.code) + '">' + mono(a.code) + "</a>" }, { h: "Désignation", f: a => esc(a.des) }, { h: "Marque / type", f: a => esc([a.marque, a.type].filter(Boolean).join(" ")) }, { h: "Répartition", f: a => geStack(a) },
+    { h: "Marche", n: 1, f: a => nb(a.M) }, { h: "Panne", n: 1, f: a => a.P ? '<span class="reste">' + nb(a.P) + "</span>" : "0" }, { h: "Dispo.", n: 1, f: a => pct(a.dispo) }, { h: "Exploit.", n: 1, f: a => pct(a.expl) },
+    { h: "Heures / km", n: 1, f: a => a.km ? nb(Math.round(a.km)) + " km" : nb(Math.round(a.hm)) + " h" }, { h: "Pannes", n: 1, f: a => nb(a.np) }, { h: "Vidanges", n: 1, f: a => nb(a.vid) }, { h: "Huile (L)", n: 1, f: a => a.oil ? nb(a.oil) : '<span class="muted">–</span>' }], eng, { limit: 300 });
+  h += "<h4>Pannes de la famille</h4>" + table([{ h: "Code", f: p => mono(p.code) }, { h: "Début", f: p => fD(p.debut) }, { h: "Fin", f: p => p.en_cours ? '<span class="pill p-crit">en cours</span>' : fD(p.fin) }, { h: "Durée", n: 1, f: p => p.duree === null ? "–" : nb(p.duree) + " j" }, { h: "Motif", f: p => esc(p.description) }, { h: "N° DA", f: p => mono(p.num_da) }],
+    pans.slice().sort((a, b) => (b.en_cours - a.en_cours) || N(b.duree) - N(a.duree)), { empty: "Aucune panne déclarée." });
+  return h + "</div>";
+}
 function geFiche(code, ml) {
   const all = GE.eng.filter(r => r.code === code).sort((a, b) => a.mois.localeCompare(b.mois)); if (!all.length) return '<div class="banner crit" style="margin-top:10px">Code « ' + esc(code) + " » absent des reportings importés.</div>";
   const R = all.filter(r => ml.includes(r.mois)), last = all[all.length - 1], e = S.engins.get(code) || {}, pans = gePannes(ml, code), A = geAgg(R, pans), V = geVidanges(ml, code), d1 = V.d1, d2 = V.d2;
@@ -1885,6 +1914,11 @@ document.addEventListener("click", async e => { const b = e.target.closest("[dat
     if (a === "ge-cumul") { const L = GE.mois.map(x => x.mois).sort(); S.f.geFrom = L[0]; S.f.geTo = L[L.length - 1]; return render(); }
     if (a === "ge-code") { const c = $("#ge-code"); S.f.geCode = c ? c.value.trim().split(/\s+[–-]\s+/)[0] : ""; return render(); }
     if (a === "ge-code-x") { S.f.geCode = ""; return render(); }
+    if (a === "ge-sec") { const o = S.f.geOpen || (S.f.geOpen = {}); o[id] = !o[id]; render(); if (o[id]) { const el = $("#ge-sec-" + id); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); } return; }
+    if (a === "ge-sec-all") { const o = S.f.geOpen || (S.f.geOpen = {}); for (const k of ["fam", "imm", "vfam", "vmois", "vlist", "pan", "mvt"]) o[k] = id === "1"; return render(); }
+    if (a === "ge-fam-x") { S.f.geFam = ""; return render(); }
+    if (a === "ge-fam-go") { e.preventDefault(); S.f.geFam = id; render(); window.scrollTo({ top: 0, behavior: "smooth" }); return; }
+    if (a === "ge-code-go") { e.preventDefault(); S.f.geCode = id; render(); window.scrollTo({ top: 0, behavior: "smooth" }); return; }
     if (a === "gp-new") return S.isAdmin && gammeForm(null);
     if (a === "gp-edit") { const g = (GAMMES || []).find(x => x.id === +id); return S.isAdmin && g && gammeForm(JSON.parse(JSON.stringify(g))); }
     if (a === "gp-del") { const g = (GAMMES || []).find(x => x.id === +id); if (!S.isAdmin || !g) return;
