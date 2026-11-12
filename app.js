@@ -1853,7 +1853,7 @@ const GE_TOL = 0.10;   /* tolérance de dépassement admise : 10 % de l'interval
 function gePlanning() {
   const out = [], last = new Map(); for (const r of GE.eng) { const o = last.get(r.code); if (!o || r.mois > o.mois) last.set(r.code, r); }
   for (const r of last.values()) {
-    if (r.date_sortie) continue; const per = GE.mois.find(x => x.mois === r.mois) || {}, prochVal = N(r.proch_vidange) || N(r.vidange_prog);
+    if (r.date_sortie) continue; if (S.inv.size && !S.inv.has(r.code)) continue;   /* uniquement les engins de l'Inventaire (présents sur le projet) */ const per = GE.mois.find(x => x.mois === r.mois) || {}, prochVal = N(r.proch_vidange) || N(r.vidange_prog);
     /* compteur le plus récent : reporting (fin de mois) ou compteur saisi dans Suivi huiles après le reporting */
     let cpt = r.cpt_fin, dRef = per.fin; for (const c of S.hCon.values()) if (c.engin === r.code && N(c.compteur) > 0 && c.date > (dRef || "") && N(c.compteur) >= N(cpt)) { cpt = N(c.compteur); dRef = c.date; }
     /* rythme = moyenne des 3 derniers mois pointés (heures ou km par jour calendaire) */
@@ -1888,7 +1888,7 @@ function gePlanningHtml(P) {
       { h: "État", f: o => { const [t, c] = GE_PL[o.etat]; return '<span class="pill ' + c + '">' + t + "</span>"; } },
       { h: "Dernière vidange", f: o => o.dDer ? fD(o.dDer) + '<br><span class="muted" style="font-size:11px">' + (o.der ? "à " + nb(o.der) + " · " : "") + esc(o.src || "") + "</span>" : '<span class="muted">' + esc(o.note || "–") + "</span>" },
       { h: "", f: o => '<button type="button" class="btn small" data-act="ge-gamme" data-id="' + esc(o.code) + '" title="Filtres à préparer">Gamme</button>' }], L, { empty: "Aucun engin dans cette catégorie.", limit: 400 }) +
-    '<p class="hint">Date prévue = date du dernier compteur + (prochaine vidange − compteur) ÷ rythme moyen des 3 derniers mois pointés. Compteur actuel = fin du dernier reporting, ou compteur plus récent saisi dans Suivi huiles. Une vidange saisie dans Suivi huiles après le dernier reporting remplace la « dernière vidange » : prochaine vidange = son compteur + l\'intervalle de l\'engin (prochaine − dernière vidange du reporting). « Données manquantes » = pas de compteur de prochaine vidange dans le reporting.</p>'; }
+    '<p class="hint">Date prévue = date du dernier compteur + (prochaine vidange − compteur) ÷ rythme moyen des 3 derniers mois pointés. Compteur actuel = fin du dernier reporting, ou compteur plus récent saisi dans Suivi huiles. Une vidange saisie dans Suivi huiles après le dernier reporting remplace la « dernière vidange » : prochaine vidange = son compteur + l\'intervalle de l\'engin (prochaine − dernière vidange du reporting). « Données manquantes » = pas de compteur de prochaine vidange dans le reporting. Seuls les engins présents dans l\'Inventaire (actuellement sur le projet) sont listés.</p>'; }
 /* ---------- B. réalisation du préventif ----------
    due : le compteur de l'engin a atteint la « prochaine vidange » connue au mois précédent ;
    à temps : une vidange enregistrée dans le mois au plus tard à prochaine vidange + 10 % de l'intervalle */
