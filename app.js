@@ -1926,7 +1926,7 @@ const gpTyp = x => { const v = S.inv.get(x.code) || {}, e = S.engins.get(x.code)
 const gpEtat = x => x.ret ? "En retard – à rattraper" : (x.k > 1 ? "Prévue (" + x.k + "e vidange)" : "Prévue");
 /* répartition des vidanges par atelier (planning journalier et hebdomadaire) : par famille d'engins, modifiable engin par engin (params.ge_atelier) */
 const GP_AT = { FIXE: "Atelier fixe", MOBILE: "Atelier mobile", ST: "Par sous-traitant", NA: "Non affecté" };
-const GP_FAM = { FIXE: ["PETIT DUMPER", "MINI CHARGEUSE", "CHARGEUSE", "TRACTOPELLE", "NIVELEUSE", "BUS", "MINI BUS", "PICK UP", "AMBULANCE", "CAMION SERVITUDE", "CAMION AMPLIROLL", "CAMION CITERNE A GASOIL", "CAMION D'ENTRETIEN", "CAMION CITERNE A EAU", "CAMION BENNE", "CAMION MALAXEUR", "ELEVATEUR CHARIOT TELESCOPIQUE", "CHARIOT ELEVATEUR FRONTAL", "CAMION POMPE A BETON"],
+const GP_FAM = { FIXE: ["PETIT DUMPER", "DUMPER", "MINI CHARGEUSE", "CHARGEUSE", "TRACTOPELLE", "NIVELEUSE", "BUS", "MINI BUS", "PICK UP", "AMBULANCE", "CAMION SERVITUDE", "CAMION AMPLIROLL", "CAMION CITERNE A GASOIL", "CAMION D'ENTRETIEN", "CAMION CITERNE A EAU", "CAMION BENNE", "CAMION MALAXEUR", "ELEVATEUR CHARIOT TELESCOPIQUE", "CHARIOT ELEVATEUR FRONTAL", "CAMION POMPE A BETON"],
   MOBILE: ["COMPRESSEUR THERMIQUE", "MINI PELLE", "BULLDOZER", "TOUR D'ECLAIRAGE", "GRUE MOBILE SUR PNEUS", "GRUE MOBILE SUR CHENILLE", "NACELLE ARTICULE DIESEL", "NACELLE CISEAUX DIESEL", "COMPACTEUR A BILLE", "GERATOIR", "POMPE A BETON STATIONNAIRE", "GROUPE ELECTROGENE", "PELLE HYDRAULIQUE"],
   ST: ["PELLE SUR CHENILLE", "PELLE SUR PNEU"] };
 /* familles sans vidange : jamais dans le planning des vidanges */
