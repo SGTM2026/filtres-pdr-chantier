@@ -1912,6 +1912,14 @@ function gpListe(P, per) { const out = [], auj = today();
     if (enRet && per.d1 > auj) { /* période future : l'engin en retard reste à rattraper */ out.push({ ...o, dPrev: per.d1, cptPrev: cpt, k, ret: true }); }
     while (pas && k < 40) { d = addJ(d, pas); cpt = cpt + o.intv; k++; if (d > per.d2) break; if (d >= per.d1 && !(enRet && per.d1 > auj)) out.push({ ...o, dPrev: d, cptPrev: cpt, k, ret: false }); } }
   return out.sort((a, b) => b.ret - a.ret || a.dPrev.localeCompare(b.dPrev) || a.code.localeCompare(b.code)); }
+/* cycle de vidange : point de cycle le plus proche AVANT le compteur de vidange (ex. 4800 h → 4500 → cycle 500 h ; 5100 → 5000 → 1000 h ; 6100 → 6000 → 2000 h) */
+function gpCycle(code, cpt, km) { const g = typeof gammeOf === "function" ? gammeOf(code) : null, cyc = g ? g.cyc : ["500 h", "1000 h", "2000 h"];
+  const val = c => { const p = String(c).split("/").map(x => x.trim()), t = p.find(x => km ? /km/i.test(x) : /\bh\b|h$/i.test(x)); return t ? +t.replace(/[^\d]/g, "") : null; };
+  const L = cyc.map((c, i) => ({ i, v: val(c), c })).filter(o => o.v > 0); if (!L.length || !(cpt > 0)) return { ci: 0, txt: "" };
+  const base = Math.min(...L.map(o => o.v)), P = Math.floor(cpt / base) * base, pick = P > 0 ? L.filter(o => P % o.v === 0).sort((a, b) => b.v - a.v)[0] : null, o = pick || L.find(o => o.v === base);
+  return { ci: o.i, txt: nb(o.v) + (km ? " km" : " h") }; }
+const gpCat = x => { const v = S.inv.get(x.code) || {}; return v.categorie || x.des || ""; };
+const gpTyp = x => { const v = S.inv.get(x.code) || {}, e = S.engins.get(x.code) || {}; return v.type || e.modele || ""; };
 const gpEtat = x => x.ret ? "En retard – à rattraper" : (x.k > 1 ? "Prévue (" + x.k + "e vidange)" : "Prévue");
 VIEWS.gplan = { title: "Planning vidanges",
   tools() { const t = S.f.gpType || "semaine", b = (k, l) => '<button type="button" class="btn small' + (t === k ? " primary" : "") + '" data-act="gp-type" data-id="' + k + '">' + l + "</button>";
@@ -1926,11 +1934,11 @@ VIEWS.gplan = { title: "Planning vidanges",
     const P = gePlanning(), per = gpPeriode(), L = gpListe(P, per), nR = L.filter(x => x.ret).length;
     let h = '<div class="more">Période : <b>' + esc(per.txt) + "</b> · " + nb(L.length) + " vidange(s) à faire</div>";
     h += '<div class="kpis">' + kpi("Vidanges à faire", nb(L.length), "acc") + kpi("Prévues sur la période", nb(L.length - nR)) + kpi("En retard à rattraper", nb(nR), nR ? "crit" : "") + kpi("Engins suivis", nb(P.filter(o => o.etat !== "inconnu").length), "txt") + "</div>";
-    const cols = [{ h: "Date prévue", f: x => "<b>" + fD(x.dPrev) + "</b>" }, { h: "Code", f: x => '<a href="#" data-act="ge-code-go" data-id="' + esc(x.code) + '">' + mono(x.code) + "</a>" }, { h: "Engin", f: x => esc(x.des) }, { h: "Famille", f: x => '<span class="muted">' + esc(x.fam) + "</span>" },
+    const cols = [{ h: "Date prévue", f: x => "<b>" + fD(x.dPrev) + "</b>" }, { h: "Code", f: x => '<a href="#" data-act="ge-code-go" data-id="' + esc(x.code) + '">' + mono(x.code) + "</a>" }, { h: "Catégorie", f: x => esc(gpCat(x)) }, { h: "Type", f: x => esc(gpTyp(x)) },
       { h: "Compteur actuel", n: 1, f: x => x.cpt === null ? "–" : nb(x.cpt) + (x.km ? " km" : " h") + '<br><span class="muted" style="font-size:11px">au ' + fD(x.dRef) + "</span>" + (x.chg ? '<br><span class="pill p-warn">⟲ compteur changé</span>' : "") },
-      { h: "Vidange à", n: 1, f: x => nb(x.cptPrev) + (x.km ? " km" : " h") }, { h: "Rythme", n: 1, f: x => nb(Math.round(x.rate * 10) / 10) + (x.km ? " km" : " h") + "/j" },
+      { h: "Vidange à", n: 1, f: x => nb(x.cptPrev) + (x.km ? " km" : " h") }, { h: "Cycle vidange", f: x => "<b>" + esc(gpCycle(x.code, x.cptPrev, x.km).txt || "–") + "</b>" }, { h: "Rythme", n: 1, f: x => nb(Math.round(x.rate * 10) / 10) + (x.km ? " km" : " h") + "/j" },
       { h: "État", f: x => '<span class="pill ' + (x.ret ? "p-crit" : x.dPrev <= addJ(today(), 7) ? "p-warn" : "p-acc") + '">' + esc(gpEtat(x)) + "</span>" + (x.ret && x.reste <= 0 ? '<br><span class="muted" style="font-size:11px">dépassée de ' + nb(-x.reste) + "</span>" : "") },
-      { h: "", f: x => '<button type="button" class="btn small" data-act="ge-gamme" data-id="' + esc(x.code) + '" title="Filtres à préparer">Gamme</button>' }];
+      { h: "", f: x => '<button type="button" class="btn small" data-act="ge-gamme" data-id="' + esc(x.code) + '" data-cyc="' + gpCycle(x.code, x.cptPrev, x.km).ci + '" title="Filtres à préparer pour ce cycle">Gamme</button>' }];
     if (per.t === "jour") h += '<div class="panel"><h3>Vidanges du ' + fD(per.d1) + "</h3>" + table(cols, L, { empty: "Aucune vidange prévue ce jour.", limit: 500 }) + "</div>";
     else { const days = []; for (let d = per.d1; d <= per.d2; d = addJ(d, 1)) days.push(d); const ret = L.filter(x => x.ret);
       if (ret.length) h += '<div class="panel"><h3>En retard – à rattraper <small>' + ret.length + "</small></h3>" + table(cols, ret, { limit: 500 }) + "</div>";
@@ -1940,14 +1948,14 @@ VIEWS.gplan = { title: "Planning vidanges",
     return h + '<p class="hint">Date prévue calculée à partir du compteur actuel, de la prochaine vidange et du rythme d\'utilisation de chaque engin (voir explication sous le planning complet). Sur une semaine ou un mois, un engin très utilisé peut avoir plusieurs vidanges (tous les « intervalle ÷ rythme » jours). Les engins en retard figurent dans « à rattraper ».</p>'; } };
 async function gpExport(kind) { if (!GE.loaded) return toast("Reportings en cours de chargement…");
   const per = gpPeriode(), L = gpListe(gePlanning(), per), u = x => x.km ? " km" : " h", nom = "Planning_vidanges_" + per.t + "_" + per.d1 + (per.d2 !== per.d1 ? "_" + per.d2 : "");
-  const rows = L.map(x => [fD(x.dPrev), x.code, x.des || "", x.fam || "", x.cpt === null ? "" : nb(x.cpt) + u(x), nb(x.cptPrev) + u(x), nb(Math.round(x.rate * 10) / 10) + u(x) + "/j", gpEtat(x), ""]);
-  const head = ["Date prévue", "Code", "Engin", "Famille", "Compteur actuel", "Vidange à", "Rythme", "État", "Réalisée (date / compteur / visa)"];
+  const rows = L.map(x => [fD(x.dPrev), x.code, gpCat(x), gpTyp(x), x.cpt === null ? "" : nb(x.cpt) + u(x), nb(x.cptPrev) + u(x), gpCycle(x.code, x.cptPrev, x.km).txt, nb(Math.round(x.rate * 10) / 10) + u(x) + "/j", gpEtat(x), ""]);
+  const head = ["Date prévue", "Code", "Catégorie", "Type", "Compteur actuel", "Vidange à", "Cycle vidange", "Rythme", "État", "Réalisée (date / compteur / visa)"];
   if (!L.length) toast("Aucune vidange sur la période : le fichier sera vide.");
   if (kind === "xls") { await loadScript("vendor/exceljs.min.js"); const wb = new ExcelJS.Workbook(); wb.creator = APPNAME; const ws = wb.addWorksheet("Planning vidanges", { pageSetup: { paperSize: 9, orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
-    ws.columns = [12, 10, 30, 22, 16, 14, 12, 26, 30].map(w => ({ width: w })); const thin = { style: "thin" }, bd = { top: thin, left: thin, bottom: thin, right: thin };
+    ws.columns = [12, 10, 26, 18, 16, 14, 13, 12, 24, 30].map(w => ({ width: w })); const thin = { style: "thin" }, bd = { top: thin, left: thin, bottom: thin, right: thin };
     ws.addRow(["PLANNING DES VIDANGES – " + per.txt]).font = { bold: true, size: 13 }; ws.addRow([(S.params.nom_chantier || "") + " · édité le " + fD(today())]).font = { size: 9, color: { argb: "FF666666" } }; ws.addRow([]);
     const hr = ws.addRow(head); hr.eachCell(c => { c.font = { bold: true, color: { argb: "FFFFFFFF" } }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0F4C5C" } }; c.border = bd; c.alignment = { horizontal: "center", vertical: "middle", wrapText: true }; });
-    L.forEach((x, i) => { const r = ws.addRow(rows[i]); r.eachCell({ includeEmpty: true }, c => { c.border = bd; c.alignment = { vertical: "middle", wrapText: true }; }); if (x.ret) r.getCell(8).font = { bold: true, color: { argb: "FFB42318" } }; });
+    L.forEach((x, i) => { const r = ws.addRow(rows[i]); r.eachCell({ includeEmpty: true }, c => { c.border = bd; c.alignment = { vertical: "middle", wrapText: true }; }); r.getCell(7).font = { bold: true }; if (x.ret) r.getCell(9).font = { bold: true, color: { argb: "FFB42318" } }; });
     ws.views = [{ state: "frozen", ySplit: 4 }]; saveBlob(new Blob([await wb.xlsx.writeBuffer()], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), nom + ".xlsx"); return; }
   await loadScript("vendor/jspdf.umd.min.js"); await loadScript("vendor/jspdf.plugin.autotable.min.js");
   const { jsPDF } = window.jspdf, doc = new jsPDF({ unit: "mm", format: "a4", orientation: "landscape" }), W = 297, sp = v => String(v).replace(/[\u00a0\u202f]/g, " ");
@@ -1955,8 +1963,8 @@ async function gpExport(kind) { if (!GE.loaded) return toast("Reportings en cour
   doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.text(sp(S.params.nom_chantier || ""), 14, 17); doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.text(sp(per.txt), W - 14, 10, { align: "right" });
   doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.text(sp(L.length + " vidange(s) · " + L.filter(x => x.ret).length + " en retard · édité le " + fD(today())), W - 14, 17, { align: "right" });
   doc.autoTable({ startY: 27, head: [head], body: rows.map(r => r.map(sp)), theme: "grid", styles: { fontSize: 8, cellPadding: 1.6, valign: "middle" }, headStyles: { fillColor: [15, 76, 92], textColor: 255, fontStyle: "bold" },
-    columnStyles: { 0: { cellWidth: 20 }, 1: { cellWidth: 16, fontStyle: "bold" }, 4: { halign: "right" }, 5: { halign: "right", fontStyle: "bold" }, 6: { halign: "right" }, 8: { cellWidth: 45 } }, margin: { left: 10, right: 10 },
-    didParseCell: d => { if (d.section === "body" && d.column.index === 7 && L[d.row.index] && L[d.row.index].ret) { d.cell.styles.textColor = [180, 35, 24]; d.cell.styles.fontStyle = "bold"; } },
+    columnStyles: { 0: { cellWidth: 20 }, 1: { cellWidth: 16, fontStyle: "bold" }, 4: { halign: "right" }, 5: { halign: "right", fontStyle: "bold" }, 6: { halign: "center", fontStyle: "bold" }, 7: { halign: "right" }, 9: { cellWidth: 42 } }, margin: { left: 10, right: 10 },
+    didParseCell: d => { if (d.section === "body" && d.column.index === 8 && L[d.row.index] && L[d.row.index].ret) { d.cell.styles.textColor = [180, 35, 24]; d.cell.styles.fontStyle = "bold"; } },
     didDrawPage: () => { doc.setFontSize(7.5); doc.setTextColor(120); doc.text("Page " + doc.getNumberOfPages(), W - 14, 205, { align: "right" }); } });
   doc.save(nom + ".pdf"); }
 const GE_PL = { retard: ["En retard", "p-crit"], j7: ["Dans les 7 jours", "p-warn"], j30: ["Dans le mois", "p-acc"], plus: ["Plus tard", "p-ok"], arret: ["Engin à l'arrêt", "p-info"], inconnu: ["Données manquantes", "p-info"] };
@@ -2162,7 +2170,7 @@ document.addEventListener("click", async e => { const b = e.target.closest("[dat
     if (a === "gp-nav") { const t = S.f.gpType || "semaine", d = S.f.gpDate || today(); if (id === "0") S.f.gpDate = today(); else if (t === "mois") { const dt = new Date(Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1 + +id, 1)); S.f.gpDate = dt.toISOString().slice(0, 10); } else S.f.gpDate = addJ(d, (t === "jour" ? 1 : 7) * +id); return render(); }
     if (a === "gp-pdf" || a === "gp-xls") { gpExport(a === "gp-pdf" ? "pdf" : "xls").catch(err => toast("Téléchargement : " + errMsg(err))); return; }
     if (a === "ge-pl-f") { S.f.gePl = id || ""; return render(); }
-    if (a === "ge-gamme") { S.f.gmCode = id; S.f.gmCodeIn = id; S.f.gmCyc = 0; go("gamme"); return; }
+    if (a === "ge-gamme") { S.f.gmCode = id; S.f.gmCodeIn = id; S.f.gmCyc = +(b.dataset.cyc || 0); go("gamme"); return; }
     if (a === "ge-fam-go") { e.preventDefault(); S.f.geFam = id; render(); window.scrollTo({ top: 0, behavior: "smooth" }); return; }
     if (a === "ge-code-go") { e.preventDefault(); S.f.geCode = id; if (S.view !== "gengins") return go("gengins"); render(); window.scrollTo({ top: 0, behavior: "smooth" }); return; }
     if (a === "gp-new") return S.isAdmin && gammeForm(null);
