@@ -111,7 +111,8 @@ function who(id) { if (!id) return '<span class="muted">Import initial</span>'; 
 
 /* ---------- navigation ---------- */
 const NAV = [
-  ["Pilotage", [["dash", "Tableau de bord", true], ["hdash", "Gestion huiles", true], ["gengins", "Gestion engins", true], ["journal", "Journal d'activité", true]]],
+  ["Pilotage", [["dash", "Tableau de bord", true], ["hdash", "Gestion huiles", true], ["journal", "Journal d'activité", true]]],
+  ["Gestion engins", [["gengins", "Gestion engins", true], ["gplan", "Planning vidanges", true]]],
   ["Magasin", [["stock", "Stock actuel"], ["entrees", "Entrées (BC / BL)"], ["sorties", "Sorties"]]],
   ["Huiles", [["huiles", "Suivi huiles"]]],
   ["Achats", [["da", "Création DA", "da"], ["suivida", "Suivi DA", "da"], ["suivibc", "Suivi BC", "da"]]],
@@ -1679,7 +1680,7 @@ const GE_ETATS = { M: ["Marche", "var(--ok)"], AF: ["Arrêt facturé", "var(--pe
 function geLoad(force) {
   if (GE.loaded && !force) return Promise.resolve();
   return GE.loading = Promise.all([fetchAll("rep_mois", "mois"), fetchAll("rep_engins", "id"), fetchAll("rep_pannes", "id"), fetchAll("rep_mouvements", "id")])
-    .then(([m, e, p, v]) => { GE.mois = m; GE.eng = e; GE.pan = p; GE.mvt = v; GE.loaded = true; GE.loading = null; if (S.view === "gengins") render(true); })
+    .then(([m, e, p, v]) => { GE.mois = m; GE.eng = e; GE.pan = p; GE.mvt = v; GE.loaded = true; GE.loading = null; if (S.view === "gengins" || S.view === "gplan") render(true); })
     .catch(err => { GE.loading = null; toast("Reporting : " + errMsg(err)); });
 }
 /* --------- lecture du fichier « CANEVAS POINTAGE » --------- */
@@ -1836,7 +1837,6 @@ VIEWS.gengins = { title: "Gestion engins",
     /* sections détaillées : masquées par défaut, affichées par les boutons */
     const open = S.f.geOpen || (S.f.geOpen = {}), mvK = new Set(), mv = GE.mvt.filter(v => ml.includes(v.mois)).filter(v => { const k = v.code + "|" + v.date_sortie; if (mvK.has(k)) return false; mvK.add(k); return true; });
     const SEC = [
-      ["plan", "Planning des vidanges", nRet + " en retard · " + n7 + " sous 7 j", () => gePlanningHtml(PL)],
       ["prev", "Réalisation du préventif", PB.taux === null ? "à calculer" : pct(PB.taux), () => gePreventifHtml(PB, PL)],
       ["hh", "Huile par heure de marche", PD.r === null ? "à calculer" : nb(Math.round(PD.r * 10) / 10) + " L/100 h", () => geHuileHtml(PD)],
       ["fam", "Taux par famille d'engins", fams.length + " familles", () => geLegend() + table([{ h: "Famille", f: a => '<a href="#" data-act="ge-fam-go" data-id="' + esc(a.fam) + '"><b>' + esc(a.fam) + "</b></a>" }, { h: "Engins", n: 1, f: a => nb(a.n) }, { h: "Répartition des jours", f: a => geStack(a) },
@@ -1886,6 +1886,7 @@ function gePlanning() {
       o.dDer = vh.date; o.der = cv; o.src = "Suivi huiles" + (N(vh.compteur) > 0 ? "" : " (compteur estimé)");
       if (interval && cv !== null) o.proch = cv + interval; else if (cv !== null) { o.proch = null; o.note = "intervalle de vidange inconnu"; } }
     else if (r.date_vidange) o.src = "Reporting";
+    o.intv = interval;
     if (!o.proch || o.cpt === null) { o.etat = "inconnu"; out.push(o); continue; }
     o.reste = o.proch - o.cpt; o.jours = o.reste <= 0 ? 0 : (rate > 0 ? Math.ceil(o.reste / rate) : null);
     o.date = o.jours === null ? null : new Date(Date.parse(dRef) + o.jours * 864e5).toISOString().slice(0, 10);
@@ -1893,6 +1894,71 @@ function gePlanning() {
     o.etat = o.reste <= 0 || (jAuj !== null && jAuj < 0) ? "retard" : (jAuj !== null && jAuj <= 7 ? "j7" : (jAuj !== null && jAuj <= 30 ? "j30" : (rate > 0 ? "plus" : "arret")));
     out.push(o); }
   return out; }
+/* =====================================================================
+   PLANNING VIDANGES : vidanges prévues sur un jour, une semaine ou un mois (+ téléchargement PDF / Excel)
+   ===================================================================== */
+const addJ = (iso, n) => new Date(Date.parse(iso) + n * 864e5).toISOString().slice(0, 10);
+function gpPeriode() { const t = S.f.gpType || "semaine", d = S.f.gpDate || today();
+  if (t === "jour") return { t, d1: d, d2: d, txt: "Journée du " + fD(d) };
+  if (t === "mois") { const d1 = d.slice(0, 8) + "01", nx = new Date(Date.UTC(+d.slice(0, 4), +d.slice(5, 7), 0)).toISOString().slice(0, 10); return { t, d1, d2: nx, txt: "Mois de " + moisTxt(d.slice(0, 7)) }; }
+  const wd = (new Date(Date.parse(d)).getUTCDay() + 6) % 7, d1 = addJ(d, -wd), d2 = addJ(d1, 6); return { t, d1, d2, txt: "Semaine du " + fD(d1) + " au " + fD(d2) }; }
+/* occurrences de vidange dans la période : 1re = date prévue (ou aujourd'hui si en retard), puis tous les « intervalle ÷ rythme » jours */
+function gpListe(P, per) { const out = [], auj = today();
+  for (const o of P) { if (o.etat === "inconnu" || o.etat === "arret") continue;
+    const enRet = o.etat === "retard"; let d = enRet ? auj : o.date, cpt = o.proch, k = 1; if (!d) continue;
+    const pas = o.intv && o.rate > 0 ? Math.max(1, Math.round(o.intv / o.rate)) : null;
+    if (enRet && per.d2 >= auj && per.d1 <= auj) out.push({ ...o, dPrev: d, cptPrev: cpt, k, ret: true });
+    else if (!enRet && d >= per.d1 && d <= per.d2) out.push({ ...o, dPrev: d, cptPrev: cpt, k, ret: false });
+    if (enRet && per.d1 > auj) { /* période future : l'engin en retard reste à rattraper */ out.push({ ...o, dPrev: per.d1, cptPrev: cpt, k, ret: true }); }
+    while (pas && k < 40) { d = addJ(d, pas); cpt = cpt + o.intv; k++; if (d > per.d2) break; if (d >= per.d1 && !(enRet && per.d1 > auj)) out.push({ ...o, dPrev: d, cptPrev: cpt, k, ret: false }); } }
+  return out.sort((a, b) => b.ret - a.ret || a.dPrev.localeCompare(b.dPrev) || a.code.localeCompare(b.code)); }
+const gpEtat = x => x.ret ? "En retard – à rattraper" : (x.k > 1 ? "Prévue (" + x.k + "e vidange)" : "Prévue");
+VIEWS.gplan = { title: "Planning vidanges",
+  tools() { const t = S.f.gpType || "semaine", b = (k, l) => '<button type="button" class="btn small' + (t === k ? " primary" : "") + '" data-act="gp-type" data-id="' + k + '">' + l + "</button>";
+    return '<div class="tools"><div class="chips" style="align-self:flex-end">' + b("jour", "Jour") + b("semaine", "Semaine") + b("mois", "Mois") + "</div>" +
+      field("gp-date", t === "mois" ? "Mois" : t === "semaine" ? "Semaine contenant le" : "Jour", t === "mois" ? '<input type="month" id="gp-date" value="' + (S.f.gpDate || today()).slice(0, 7) + '">' : '<input type="date" id="gp-date" value="' + (S.f.gpDate || today()) + '">') +
+      '<div class="chips" style="align-self:flex-end"><button type="button" class="btn small" data-act="gp-nav" data-id="-1" title="Période précédente">◀</button><button type="button" class="btn small" data-act="gp-nav" data-id="0">Aujourd\'hui</button><button type="button" class="btn small" data-act="gp-nav" data-id="1" title="Période suivante">▶</button></div>' +
+      '<span class="grow"></span><button class="btn" data-act="gp-xls">⬇ Excel</button><button class="btn primary" data-act="gp-pdf">⬇ PDF</button></div>'; },
+  bind() { const e = $("#gp-date"); if (e) e.onchange = () => { if (e.value) { S.f.gpDate = e.type === "month" ? e.value + "-01" : e.value; render(); } }; },
+  body() { if (!S.isAdmin) return '<div class="empty">Réservé aux administrateurs.</div>';
+    if (!GE.loaded) { if (!GE.loading) geLoad(); return '<div class="empty">Chargement des reportings…</div>'; }
+    if (!GE.mois.length) return '<div class="empty">Aucun reporting importé : ajoutez les reportings dans « Gestion engins ».</div>';
+    const P = gePlanning(), per = gpPeriode(), L = gpListe(P, per), nR = L.filter(x => x.ret).length;
+    let h = '<div class="more">Période : <b>' + esc(per.txt) + "</b> · " + nb(L.length) + " vidange(s) à faire</div>";
+    h += '<div class="kpis">' + kpi("Vidanges à faire", nb(L.length), "acc") + kpi("Prévues sur la période", nb(L.length - nR)) + kpi("En retard à rattraper", nb(nR), nR ? "crit" : "") + kpi("Engins suivis", nb(P.filter(o => o.etat !== "inconnu").length), "txt") + "</div>";
+    const cols = [{ h: "Date prévue", f: x => "<b>" + fD(x.dPrev) + "</b>" }, { h: "Code", f: x => '<a href="#" data-act="ge-code-go" data-id="' + esc(x.code) + '">' + mono(x.code) + "</a>" }, { h: "Engin", f: x => esc(x.des) }, { h: "Famille", f: x => '<span class="muted">' + esc(x.fam) + "</span>" },
+      { h: "Compteur actuel", n: 1, f: x => x.cpt === null ? "–" : nb(x.cpt) + (x.km ? " km" : " h") + '<br><span class="muted" style="font-size:11px">au ' + fD(x.dRef) + "</span>" + (x.chg ? '<br><span class="pill p-warn">⟲ compteur changé</span>' : "") },
+      { h: "Vidange à", n: 1, f: x => nb(x.cptPrev) + (x.km ? " km" : " h") }, { h: "Rythme", n: 1, f: x => nb(Math.round(x.rate * 10) / 10) + (x.km ? " km" : " h") + "/j" },
+      { h: "État", f: x => '<span class="pill ' + (x.ret ? "p-crit" : x.dPrev <= addJ(today(), 7) ? "p-warn" : "p-acc") + '">' + esc(gpEtat(x)) + "</span>" + (x.ret && x.reste <= 0 ? '<br><span class="muted" style="font-size:11px">dépassée de ' + nb(-x.reste) + "</span>" : "") },
+      { h: "", f: x => '<button type="button" class="btn small" data-act="ge-gamme" data-id="' + esc(x.code) + '" title="Filtres à préparer">Gamme</button>' }];
+    if (per.t === "jour") h += '<div class="panel"><h3>Vidanges du ' + fD(per.d1) + "</h3>" + table(cols, L, { empty: "Aucune vidange prévue ce jour.", limit: 500 }) + "</div>";
+    else { const days = []; for (let d = per.d1; d <= per.d2; d = addJ(d, 1)) days.push(d); const ret = L.filter(x => x.ret);
+      if (ret.length) h += '<div class="panel"><h3>En retard – à rattraper <small>' + ret.length + "</small></h3>" + table(cols, ret, { limit: 500 }) + "</div>";
+      const parJ = days.map(d => [d, L.filter(x => !x.ret && x.dPrev === d)]).filter(([, l]) => l.length);
+      h += '<div class="panel"><h3>Vidanges prévues par jour <small>' + nb(L.length - ret.length) + "</small></h3>" + (parJ.length ? parJ.map(([d, l]) => "<h4>" + esc(new Date(Date.parse(d)).toLocaleDateString("fr-FR", { weekday: "long", timeZone: "UTC" })) + " " + fD(d) + ' <small class="muted">' + l.length + " vidange(s)</small></h4>" + table(cols, l, { limit: 500 })).join("") : '<div class="empty">Aucune vidange prévue sur la période.</div>') + "</div>"; }
+    h += '<div class="panel"><h3>Planning complet des engins</h3>' + gePlanningHtml(P) + "</div>";
+    return h + '<p class="hint">Date prévue calculée à partir du compteur actuel, de la prochaine vidange et du rythme d\'utilisation de chaque engin (voir explication sous le planning complet). Sur une semaine ou un mois, un engin très utilisé peut avoir plusieurs vidanges (tous les « intervalle ÷ rythme » jours). Les engins en retard figurent dans « à rattraper ».</p>'; } };
+async function gpExport(kind) { if (!GE.loaded) return toast("Reportings en cours de chargement…");
+  const per = gpPeriode(), L = gpListe(gePlanning(), per), u = x => x.km ? " km" : " h", nom = "Planning_vidanges_" + per.t + "_" + per.d1 + (per.d2 !== per.d1 ? "_" + per.d2 : "");
+  const rows = L.map(x => [fD(x.dPrev), x.code, x.des || "", x.fam || "", x.cpt === null ? "" : nb(x.cpt) + u(x), nb(x.cptPrev) + u(x), nb(Math.round(x.rate * 10) / 10) + u(x) + "/j", gpEtat(x), ""]);
+  const head = ["Date prévue", "Code", "Engin", "Famille", "Compteur actuel", "Vidange à", "Rythme", "État", "Réalisée (date / compteur / visa)"];
+  if (!L.length) toast("Aucune vidange sur la période : le fichier sera vide.");
+  if (kind === "xls") { await loadScript("vendor/exceljs.min.js"); const wb = new ExcelJS.Workbook(); wb.creator = APPNAME; const ws = wb.addWorksheet("Planning vidanges", { pageSetup: { paperSize: 9, orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
+    ws.columns = [12, 10, 30, 22, 16, 14, 12, 26, 30].map(w => ({ width: w })); const thin = { style: "thin" }, bd = { top: thin, left: thin, bottom: thin, right: thin };
+    ws.addRow(["PLANNING DES VIDANGES – " + per.txt]).font = { bold: true, size: 13 }; ws.addRow([(S.params.nom_chantier || "") + " · édité le " + fD(today())]).font = { size: 9, color: { argb: "FF666666" } }; ws.addRow([]);
+    const hr = ws.addRow(head); hr.eachCell(c => { c.font = { bold: true, color: { argb: "FFFFFFFF" } }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0F4C5C" } }; c.border = bd; c.alignment = { horizontal: "center", vertical: "middle", wrapText: true }; });
+    L.forEach((x, i) => { const r = ws.addRow(rows[i]); r.eachCell({ includeEmpty: true }, c => { c.border = bd; c.alignment = { vertical: "middle", wrapText: true }; }); if (x.ret) r.getCell(8).font = { bold: true, color: { argb: "FFB42318" } }; });
+    ws.views = [{ state: "frozen", ySplit: 4 }]; saveBlob(new Blob([await wb.xlsx.writeBuffer()], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), nom + ".xlsx"); return; }
+  await loadScript("vendor/jspdf.umd.min.js"); await loadScript("vendor/jspdf.plugin.autotable.min.js");
+  const { jsPDF } = window.jspdf, doc = new jsPDF({ unit: "mm", format: "a4", orientation: "landscape" }), W = 297, sp = v => String(v).replace(/[\u00a0\u202f]/g, " ");
+  doc.setFillColor(15, 76, 92); doc.rect(0, 0, W, 22, "F"); doc.setTextColor(255); doc.setFont("helvetica", "bold"); doc.setFontSize(15); doc.text("PLANNING DES VIDANGES", 14, 10);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.text(sp(S.params.nom_chantier || ""), 14, 17); doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.text(sp(per.txt), W - 14, 10, { align: "right" });
+  doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.text(sp(L.length + " vidange(s) · " + L.filter(x => x.ret).length + " en retard · édité le " + fD(today())), W - 14, 17, { align: "right" });
+  doc.autoTable({ startY: 27, head: [head], body: rows.map(r => r.map(sp)), theme: "grid", styles: { fontSize: 8, cellPadding: 1.6, valign: "middle" }, headStyles: { fillColor: [15, 76, 92], textColor: 255, fontStyle: "bold" },
+    columnStyles: { 0: { cellWidth: 20 }, 1: { cellWidth: 16, fontStyle: "bold" }, 4: { halign: "right" }, 5: { halign: "right", fontStyle: "bold" }, 6: { halign: "right" }, 8: { cellWidth: 45 } }, margin: { left: 10, right: 10 },
+    didParseCell: d => { if (d.section === "body" && d.column.index === 7 && L[d.row.index] && L[d.row.index].ret) { d.cell.styles.textColor = [180, 35, 24]; d.cell.styles.fontStyle = "bold"; } },
+    didDrawPage: () => { doc.setFontSize(7.5); doc.setTextColor(120); doc.text("Page " + doc.getNumberOfPages(), W - 14, 205, { align: "right" }); } });
+  doc.save(nom + ".pdf"); }
 const GE_PL = { retard: ["En retard", "p-crit"], j7: ["Dans les 7 jours", "p-warn"], j30: ["Dans le mois", "p-acc"], plus: ["Plus tard", "p-ok"], arret: ["Engin à l'arrêt", "p-info"], inconnu: ["Données manquantes", "p-info"] };
 function gePlanningHtml(P) {
   const ord = { retard: 0, j7: 1, j30: 2, plus: 3, arret: 4, inconnu: 5 }, f = S.f.gePl || "", L = P.filter(o => !f || o.etat === f).sort((a, b) => ord[a.etat] - ord[b.etat] || (a.date || "9").localeCompare(b.date || "9") || N(a.reste) - N(b.reste));
@@ -2090,11 +2156,15 @@ document.addEventListener("click", async e => { const b = e.target.closest("[dat
     if (a === "ge-sec") { const o = S.f.geOpen || (S.f.geOpen = {}); o[id] = !o[id]; render(); if (o[id]) { const el = $("#ge-sec-" + id); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); } return; }
     if (a === "ge-sec-all") { const o = S.f.geOpen || (S.f.geOpen = {}); for (const k of ["plan", "prev", "hh", "fam", "imm", "vfam", "vmois", "vlist", "pan", "mvt"]) o[k] = id === "1"; return render(); }
     if (a === "ge-fam-x") { S.f.geFam = ""; return render(); }
+    if (a === "ge-sec-open" && id === "plan") { e.preventDefault(); return go("gplan"); }
     if (a === "ge-sec-open") { e.preventDefault(); (S.f.geOpen || (S.f.geOpen = {}))[id] = true; render(); const el = $("#ge-sec-" + id); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
+    if (a === "gp-type") { S.f.gpType = id; return render(); }
+    if (a === "gp-nav") { const t = S.f.gpType || "semaine", d = S.f.gpDate || today(); if (id === "0") S.f.gpDate = today(); else if (t === "mois") { const dt = new Date(Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1 + +id, 1)); S.f.gpDate = dt.toISOString().slice(0, 10); } else S.f.gpDate = addJ(d, (t === "jour" ? 1 : 7) * +id); return render(); }
+    if (a === "gp-pdf" || a === "gp-xls") { gpExport(a === "gp-pdf" ? "pdf" : "xls").catch(err => toast("Téléchargement : " + errMsg(err))); return; }
     if (a === "ge-pl-f") { S.f.gePl = id || ""; return render(); }
     if (a === "ge-gamme") { S.f.gmCode = id; S.f.gmCodeIn = id; S.f.gmCyc = 0; go("gamme"); return; }
     if (a === "ge-fam-go") { e.preventDefault(); S.f.geFam = id; render(); window.scrollTo({ top: 0, behavior: "smooth" }); return; }
-    if (a === "ge-code-go") { e.preventDefault(); S.f.geCode = id; render(); window.scrollTo({ top: 0, behavior: "smooth" }); return; }
+    if (a === "ge-code-go") { e.preventDefault(); S.f.geCode = id; if (S.view !== "gengins") return go("gengins"); render(); window.scrollTo({ top: 0, behavior: "smooth" }); return; }
     if (a === "gp-new") return S.isAdmin && gammeForm(null);
     if (a === "gp-edit") { const g = (GAMMES || []).find(x => x.id === +id); return S.isAdmin && g && gammeForm(JSON.parse(JSON.stringify(g))); }
     if (a === "gp-del") { const g = (GAMMES || []).find(x => x.id === +id); if (!S.isAdmin || !g) return;
