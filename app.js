@@ -1951,6 +1951,7 @@ async function gpExport(kind) { if (!GE.loaded) return toast("Reportings en cour
   const rows = L.map(x => [fD(x.dPrev), x.code, gpCat(x), gpTyp(x), x.cpt === null ? "" : nb(x.cpt) + u(x), nb(x.cptPrev) + u(x), gpCycle(x.code, x.cptPrev, x.km).txt, nb(Math.round(x.rate * 10) / 10) + u(x) + "/j", gpEtat(x), ""]);
   const head = ["Date prévue", "Code", "Catégorie", "Type", "Compteur actuel", "Vidange à", "Cycle vidange", "Rythme", "État", "Réalisée (date / compteur / visa)"];
   if (!L.length) toast("Aucune vidange sur la période : le fichier sera vide.");
+  if (kind === "pdf" && per.t === "mois") return gpPdfMois(per, L, nom);
   if (kind === "xls") { await loadScript("vendor/exceljs.min.js"); const wb = new ExcelJS.Workbook(); wb.creator = APPNAME; const ws = wb.addWorksheet("Planning vidanges", { pageSetup: { paperSize: 9, orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
     ws.columns = [12, 10, 26, 18, 16, 14, 13, 12, 24, 30].map(w => ({ width: w })); const thin = { style: "thin" }, bd = { top: thin, left: thin, bottom: thin, right: thin };
     ws.addRow(["PLANNING DES VIDANGES – " + per.txt]).font = { bold: true, size: 13 }; ws.addRow([(S.params.nom_chantier || "") + " · édité le " + fD(today())]).font = { size: 9, color: { argb: "FF666666" } }; ws.addRow([]);
@@ -1966,6 +1967,78 @@ async function gpExport(kind) { if (!GE.loaded) return toast("Reportings en cour
     columnStyles: { 0: { cellWidth: 20 }, 1: { cellWidth: 16, fontStyle: "bold" }, 4: { halign: "right" }, 5: { halign: "right", fontStyle: "bold" }, 6: { halign: "center", fontStyle: "bold" }, 7: { halign: "right" }, 9: { cellWidth: 42 } }, margin: { left: 10, right: 10 },
     didParseCell: d => { if (d.section === "body" && d.column.index === 8 && L[d.row.index] && L[d.row.index].ret) { d.cell.styles.textColor = [180, 35, 24]; d.cell.styles.fontStyle = "bold"; } },
     didDrawPage: () => { doc.setFontSize(7.5); doc.setTextColor(120); doc.text("Page " + doc.getNumberOfPages(), W - 14, 205, { align: "right" }); } });
+  doc.save(nom + ".pdf"); }
+/* ---------- rapport mensuel PDF (A3 paysage) : calendrier du mois + planning détaillé par semaine ---------- */
+const JOURS_L = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"];
+const isoWeek = iso => { const d = new Date(Date.parse(iso)), t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 3 - (d.getUTCDay() + 6) % 7)), w1 = new Date(Date.UTC(t.getUTCFullYear(), 0, 4)); return 1 + Math.round(((t - w1) / 864e5 - 3 + (w1.getUTCDay() + 6) % 7) / 7); };
+const lundiDe = iso => addJ(iso, -((new Date(Date.parse(iso)).getUTCDay() + 6) % 7));
+const titreCase = s => String(s || "").toLowerCase().replace(/(^|[\s\-\/(])([a-zà-ÿ])/g, (m, a, b) => a + b.toUpperCase());
+function gpPrio(x) { const auj = today(), rs = x.cptPrev - (x.cpt || 0), u = x.km ? " km" : " h";
+  if (x.ret) return { t: rs <= 0 ? "URGENT – dépassé de " + nb(-rs).replace(/[\u00a0\u202f]/g, " ") + u : "URGENT – date dépassée", c: "urg" };
+  if (x.k === 1 && Math.round((Date.parse(x.dPrev) - Date.parse(auj)) / 864e5) <= 2) return { t: "Prioritaire (2 j max)", c: "prio" };
+  return { t: "Planifiée", c: "" }; }
+function gpObs(x) { const o = [], u = x.km ? " km" : " h"; if (x.chg) o.push("Compteur changé le " + fD(x.chg.date)); if (x.k > 1) o.push(x.k + "e vidange du mois");
+  if (x.rate > 0 && x.rate < 1 && !x.km) o.push("Utilisation faible (<1 h/jour)"); if (x.src && /estim/.test(x.src)) o.push("Dernier compteur estimé"); return o.join(" · "); }
+async function gpPdfMois(per, L, nom) {
+  await loadScript("vendor/jspdf.umd.min.js"); await loadScript("vendor/jspdf.plugin.autotable.min.js");
+  const { jsPDF } = window.jspdf, doc = new jsPDF({ unit: "mm", format: "a3", orientation: "landscape" }), W = 420, H = 297, M = 12, sp = v => String(v ?? "").replace(/[\u00a0\u202f]/g, " "), auj = today();
+  const NAVY = [31, 56, 100], BLUE = [47, 84, 150], LBLUE = [217, 225, 242], YEL = [255, 252, 235], GREY = [217, 217, 217], LGREY = [236, 236, 236], RED = [255, 199, 206], ORA = [255, 229, 153];
+  const MOIS = moisTxt(per.d1.slice(0, 7)).toUpperCase(), chantier = S.params.nom_chantier || "";
+  const bar = (txt, y, h, fs) => { doc.setFillColor(...NAVY); doc.rect(M, y, W - 2 * M, h, "F"); doc.setTextColor(255); doc.setFont("helvetica", "bold"); doc.setFontSize(fs); doc.text(sp(txt), W / 2, y + h / 2 + fs * 0.13, { align: "center" }); };
+  /* ===== page 1 : calendrier ===== */
+  bar("CALENDRIER DES VIDANGES – " + MOIS, M, 12, 17);
+  const cw = (W - 2 * M) / 7; let y = M + 17;
+  doc.setDrawColor(143, 170, 220); doc.setLineWidth(0.25);
+  JOURS_L.forEach((j, i) => { doc.setFillColor(...BLUE); doc.rect(M + i * cw, y, cw, 8, "FD"); doc.setTextColor(255); doc.setFontSize(11); doc.setFont("helvetica", "bold"); doc.text(j, M + i * cw + cw / 2, y + 5.5, { align: "center" }); });
+  y += 8;
+  const parJ = {}; for (const x of L) (parJ[x.dPrev] = parJ[x.dPrev] || []).push(x);
+  const weeks = []; for (let d = lundiDe(per.d1); d <= per.d2; d = addJ(d, 7)) weeks.push(d);
+  doc.setFontSize(8.5); const lh = 3.6;
+  const lignes = d => (parJ[d] || []).flatMap(x => doc.splitTextToSize(sp("• " + x.code + " – " + titreCase(x.fam || gpCat(x)) + (x.ret ? " (RETARD)" : "")), cw - 1.5));
+  let rowsH = weeks.map(w => Math.max(16, ...[0, 1, 2, 3, 4, 5, 6].map(i => lignes(addJ(w, i)).length * lh + 3)));
+  const avail = H - M - 8 - y - weeks.length * 7, tot = rowsH.reduce((a, b) => a + b, 0); if (tot > avail) rowsH = rowsH.map(h => h * avail / tot); else if (tot < avail * 0.75) rowsH = rowsH.map(h => Math.min(h * 1.4, h + 15));
+  weeks.forEach((w, wi) => {
+    for (let i = 0; i < 7; i++) { const d = addJ(w, i), x0 = M + i * cw, inM = d >= per.d1 && d <= per.d2, n = (parJ[d] || []).length, past = d < auj;
+      if (!inM) { doc.setFillColor(255, 255, 255); doc.rect(x0, y, cw, 7 + rowsH[wi], "S"); continue; }
+      doc.setFillColor(...(n ? NAVY : past ? GREY : LBLUE)); doc.rect(x0, y, cw, 7, "FD");
+      doc.setTextColor(...(n ? [255, 255, 255] : [60, 60, 60])); doc.setFont("helvetica", "bold"); doc.setFontSize(9.5);
+      doc.text(sp(d.slice(8, 10) + "/" + d.slice(5, 7) + (n ? "   ·   " + n + " vidange(s)" : "")), x0 + cw / 2, y + 4.8, { align: "center" });
+      doc.setFillColor(...(n ? YEL : past ? LGREY : [255, 255, 255])); doc.rect(x0, y + 7, cw, rowsH[wi], "FD");
+      doc.setTextColor(30); doc.setFont("helvetica", "normal"); doc.setFontSize(8.5);
+      if (past && !n) doc.text("(passé)", x0 + 1, y + 10.5);
+      let yy = y + 10.5; for (const x of parJ[d] || []) { const t = doc.splitTextToSize(sp("• " + x.code + " – " + titreCase(x.fam || gpCat(x)) + (x.ret ? " (RETARD)" : "")), cw - 1.5); if (x.ret) doc.setTextColor(180, 35, 24); doc.text(t, x0 + 0.8, yy); doc.setTextColor(30); yy += t.length * lh * (rowsH[wi] < 16 ? 0.85 : 1); } }
+    y += 7 + rowsH[wi]; });
+  /* ===== page 2 : planning détaillé ===== */
+  doc.addPage("a3", "landscape"); bar("PLANNING MENSUEL DES VIDANGES – " + MOIS, M, 11, 15);
+  doc.setFillColor(...LBLUE); doc.rect(M, M + 11, W - 2 * M, 6, "F"); doc.setTextColor(40); doc.setFont("helvetica", "italic"); doc.setFontSize(9); doc.text(sp("Chantier : " + chantier), W / 2, M + 15.2, { align: "center" });
+  const sem = []; for (const x of L) { const lu = lundiDe(x.dPrev); let s = sem.find(o => o.lu === lu); if (!s) sem.push(s = { lu, L: [] }); s.L.push(x); } sem.sort((a, b) => a.lu.localeCompare(b.lu));
+  const clip = lu => { const a = lu < per.d1 ? per.d1 : lu, b = addJ(lu, 6) > per.d2 ? per.d2 : addJ(lu, 6); return [a, b]; }, dm = d => d.slice(8, 10) + "/" + d.slice(5, 7);
+  /* encadré des totaux par semaine */
+  let bx = M + 60; const by = M + 24, bw = 42;
+  for (const s of sem) { const [a, b] = clip(s.lu); doc.setDrawColor(191, 144, 0); doc.setFillColor(255, 230, 153); doc.rect(bx, by, bw, 7, "FD"); doc.setFillColor(255, 242, 204); doc.rect(bx, by + 7, bw, 9, "FD");
+    doc.setTextColor(60); doc.setFont("helvetica", "bold"); doc.setFontSize(7.5); doc.text(sp("Semaine " + isoWeek(s.lu) + " (" + a.slice(8, 10) + "–" + dm(b) + ")"), bx + bw / 2, by + 4.6, { align: "center" });
+    doc.setFontSize(14); doc.setTextColor(...NAVY); doc.text(String(s.L.length), bx + bw / 2, by + 13.5, { align: "center" }); bx += bw; }
+  doc.setDrawColor(143, 170, 220); doc.setFillColor(...LBLUE); doc.rect(W - M - 110, by, 70, 8, "FD"); doc.rect(W - M - 110, by + 8, 70, 8, "FD");
+  doc.setTextColor(...NAVY); doc.setFontSize(13); doc.text("TOTAL " + MOIS.split(" ")[0], W - M - 75, by + 5.7, { align: "center" }); doc.setFontSize(15); doc.text(String(L.length), W - M - 75, by + 14, { align: "center" });
+  const head = [["N°", "Jour", "Date prévue", "Code", "Désignation", "Famille", "Marque / Type", "Unité", "Compteur actuel", "Prochaine vidange", "Cycle vidange", "Reste", "Moy. / jour", "Priorité", "Date réalisée", "Compteur réalisé", "Visa / Observations"]];
+  const body = [], meta = []; let n = 0;
+  for (const s of sem) { const [a, b] = clip(s.lu), jA = JOURS_L[(new Date(Date.parse(a)).getUTCDay() + 6) % 7].toLowerCase(), jB = JOURS_L[(new Date(Date.parse(b)).getUTCDay() + 6) % 7].toLowerCase();
+    body.push([{ content: sp("SEMAINE " + isoWeek(s.lu) + " – du " + jA + " " + dm(a) + " au " + jB + " " + dm(b) + (s.L.some(x => x.ret) ? " (retards inclus)" : "") + "   ·   " + s.L.length + " vidange(s)"), colSpan: 17 }]); meta.push(null);
+    for (const x of s.L.sort((p, q) => q.ret - p.ret || p.dPrev.localeCompare(q.dPrev) || p.code.localeCompare(q.code))) { const v = S.inv.get(x.code) || {}, e = S.engins.get(x.code) || {}, pr = gpPrio(x), cy = gpCycle(x.code, x.cptPrev, x.km);
+      body.push([++n, JOURS_L[(new Date(Date.parse(x.dPrev)).getUTCDay() + 6) % 7], fD(x.dPrev), x.code, gpCat(x), x.fam || "", [v.marque || e.marque, v.type || e.modele].filter(Boolean).join(" / "), x.km ? "km" : "h", x.cpt === null ? "" : nb(x.cpt), nb(x.cptPrev), cy.txt, nb(x.cptPrev - (x.cpt || 0)), nb(Math.round(x.rate * 10) / 10), pr.t, "", "", gpObs(x)].map(sp)); meta.push(pr.c); } }
+  if (!L.length) { body.push([{ content: "Aucune vidange prévue sur le mois.", colSpan: 17 }]); meta.push(null); }
+  doc.autoTable({ startY: by + 22, head, body, theme: "grid", margin: { left: M, right: M, top: M, bottom: 14 },
+    styles: { fontSize: 7.5, cellPadding: 1.3, valign: "middle", lineColor: [143, 170, 220], lineWidth: 0.2, textColor: 30 },
+    headStyles: { fillColor: BLUE, textColor: 255, fontStyle: "bold", halign: "center", fontSize: 7.5 },
+    columnStyles: { 0: { cellWidth: 9, halign: "center" }, 1: { cellWidth: 18, halign: "center" }, 2: { cellWidth: 20, halign: "center" }, 3: { cellWidth: 16, halign: "center", fontStyle: "bold", fontSize: 8.5 }, 4: { cellWidth: 32 }, 5: { cellWidth: 42 }, 6: { cellWidth: 38 },
+      7: { cellWidth: 11, halign: "center" }, 8: { cellWidth: 20, halign: "center" }, 9: { cellWidth: 20, halign: "center" }, 10: { cellWidth: 18, halign: "center", fontStyle: "bold" }, 11: { cellWidth: 16, halign: "center" }, 12: { cellWidth: 14, halign: "center" },
+      13: { cellWidth: 34, halign: "center" }, 14: { cellWidth: 19 }, 15: { cellWidth: 19 }, 16: { cellWidth: "auto", fontSize: 6.8, textColor: [192, 0, 0], fontStyle: "italic" } },
+    didParseCell: d => { if (d.section !== "body") return; const m = meta[d.row.index];
+      if (d.row.raw.length === 1) { d.cell.styles.fillColor = NAVY; d.cell.styles.textColor = 255; d.cell.styles.fontStyle = "bold"; d.cell.styles.fontSize = 8.5; d.cell.styles.halign = "left"; return; }
+      if (d.column.index >= 14) d.cell.styles.fillColor = YEL;
+      if (m === "urg") { if (d.column.index < 14) d.cell.styles.fillColor = RED; if (d.column.index < 14) { d.cell.styles.textColor = [156, 0, 6]; d.cell.styles.fontStyle = "bold"; } }
+      else if (m === "prio" && d.column.index === 13) { d.cell.styles.fillColor = ORA; d.cell.styles.textColor = [127, 96, 0]; d.cell.styles.fontStyle = "bold"; } } });
+  const np = doc.getNumberOfPages(); for (let i = 1; i <= np; i++) { doc.setPage(i); doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(110); doc.text("SGTM – Service Matériel", M, H - 6); doc.text(sp("Édité le " + fD(auj)), W / 2, H - 6, { align: "center" }); doc.text("Page " + i + " / " + np, W - M, H - 6, { align: "right" }); }
   doc.save(nom + ".pdf"); }
 const GE_PL = { retard: ["En retard", "p-crit"], j7: ["Dans les 7 jours", "p-warn"], j30: ["Dans le mois", "p-acc"], plus: ["Plus tard", "p-ok"], arret: ["Engin à l'arrêt", "p-info"], inconnu: ["Données manquantes", "p-info"] };
 function gePlanningHtml(P) {
