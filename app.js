@@ -1213,6 +1213,9 @@ function hAtelierConsoPanel(f, to) {
     { h: "Interventions", n: 1, f: r => nb(r.n) }, { h: "Vidange", n: 1, f: r => nb(r.vid) }, { h: "Fuite", n: 1, f: r => r.fui ? '<span class="reste">' + nb(r.fui) + "</span>" : "0" }, { h: "Remise à niveau", n: 1, f: r => nb(r.niv) }, { h: "Engins servis", n: 1, f: r => nb(r.eng) }], rows);
   return h + "</div>";
 }
+document.addEventListener("change", async e => { const el = e.target; if (!el.classList || !el.classList.contains("gp-at")) return; const c = el.dataset.code, o = Object.assign({}, S.params.ge_atelier || {}), x = { code: c, fam: ((GE.eng.find(r => r.code === c)) || {}).famille };
+  if (el.value === gpAtFam(x)) delete o[c]; else o[c] = el.value;
+  try { const r = await must(sb.from("params").update({ ge_atelier: o }).eq("id", 1).select().single()); S.params = Object.assign(S.params, r, { ge_atelier: (r && r.ge_atelier) || o }); toast("Engin " + c + " → " + GP_AT[el.value]); render(); } catch (err) { toast("Atelier : " + errMsg(err)); } });
 document.addEventListener("change", e => { if (e.target.id === "ge-fam") { S.f.geFam = e.target.value; render(); } });
 document.addEventListener("change", e => { if (e.target.id === "hd-at-h") { S.f.hdAtH = e.target.value; render(); } });
 
@@ -1921,13 +1924,23 @@ function gpCycle(code, cpt, km) { const g = typeof gammeOf === "function" ? gamm
 const gpCat = x => { const v = S.inv.get(x.code) || {}; return v.categorie || x.des || ""; };
 const gpTyp = x => { const v = S.inv.get(x.code) || {}, e = S.engins.get(x.code) || {}; return v.type || e.modele || ""; };
 const gpEtat = x => x.ret ? "En retard – à rattraper" : (x.k > 1 ? "Prévue (" + x.k + "e vidange)" : "Prévue");
+/* répartition des vidanges par atelier (planning journalier et hebdomadaire) : par famille d'engins, modifiable engin par engin (params.ge_atelier) */
+const GP_AT = { FIXE: "Atelier fixe", MOBILE: "Atelier mobile", ST: "Par sous-traitant", NA: "Non affecté" };
+const GP_FAM = { FIXE: ["PETIT DUMPER", "MINI CHARGEUSE", "CHARGEUSE", "TRACTOPELLE", "NIVELEUSE", "BUS", "MINI BUS", "PICK UP", "AMBULANCE", "CAMION SERVITUDE", "CAMION AMPLIROLL", "CAMION CITERNE A GASOIL", "CAMION D'ENTRETIEN", "CAMION CITERNE A EAU", "CAMION BENNE", "CAMION MALAXEUR", "ELEVATEUR CHARIOT TELESCOPIQUE", "CHARIOT ELEVATEUR FRONTAL", "CAMION POMPE A BETON", "GROUPE ELECTROGENE"],
+  MOBILE: ["COMPRESSEUR THERMIQUE", "MINI PELLE", "BULLDOZER", "TOUR D'ECLAIRAGE", "GRUE MOBILE SUR PNEUS", "GRUE MOBILE SUR CHENILLE", "NACELLE ARTICULE DIESEL", "NACELLE CISEAUX DIESEL", "COMPACTEUR A BILLE", "GERATOIR", "POMPE A BETON STATIONNAIRE"],
+  ST: ["PELLE SUR CHENILLE", "PELLE SUR PNEU"] };
+const gpK = f => nh(f || "").replace(/[^a-z0-9]/g, "");
+const GP_FAMK = new Map(Object.entries(GP_FAM).flatMap(([a, L]) => L.map(f => [gpK(f), a])));
+const gpAtFam = x => GP_FAMK.get(gpK(x.fam)) || GP_FAMK.get(gpK((S.inv.get(x.code) || {}).famille)) || "NA";
+const gpAt = x => { const o = S.params.ge_atelier || {}; return GP_AT[o[x.code]] ? o[x.code] : gpAtFam(x); };
 VIEWS.gplan = { title: "Planning vidanges",
   tools() { const t = S.f.gpType || "semaine", b = (k, l) => '<button type="button" class="btn small' + (t === k ? " primary" : "") + '" data-act="gp-type" data-id="' + k + '">' + l + "</button>";
     return '<div class="tools"><div class="chips" style="align-self:flex-end">' + b("jour", "Jour") + b("semaine", "Semaine") + b("mois", "Mois") + "</div>" +
       field("gp-date", t === "mois" ? "Mois" : t === "semaine" ? "Semaine contenant le" : "Jour", t === "mois" ? '<input type="month" id="gp-date" value="' + (S.f.gpDate || today()).slice(0, 7) + '">' : '<input type="date" id="gp-date" value="' + (S.f.gpDate || today()) + '">') +
       '<div class="chips" style="align-self:flex-end"><button type="button" class="btn small" data-act="gp-nav" data-id="-1" title="Période précédente">◀</button><button type="button" class="btn small" data-act="gp-nav" data-id="0">Aujourd\'hui</button><button type="button" class="btn small" data-act="gp-nav" data-id="1" title="Période suivante">▶</button></div>' +
       '<span class="grow"></span><button class="btn" data-act="gp-xls">⬇ Excel</button><button class="btn primary" data-act="gp-pdf">⬇ PDF</button></div>'; },
-  bind() { const e = $("#gp-date"); if (e) e.onchange = () => { if (e.value) { S.f.gpDate = e.type === "month" ? e.value + "-01" : e.value; render(); } }; },
+  bind() {
+    const e = $("#gp-date"); if (e) e.onchange = () => { if (e.value) { S.f.gpDate = e.type === "month" ? e.value + "-01" : e.value; render(); } }; },
   body() { if (!S.isAdmin) return '<div class="empty">Réservé aux administrateurs.</div>';
     if (!GE.loaded) { if (!GE.loading) geLoad(); return '<div class="empty">Chargement des reportings…</div>'; }
     if (!GE.mois.length) return '<div class="empty">Aucun reporting importé : ajoutez les reportings dans « Gestion engins ».</div>';
@@ -1938,16 +1951,19 @@ VIEWS.gplan = { title: "Planning vidanges",
       { h: "Compteur actuel", n: 1, f: x => x.cpt === null ? "–" : nb(x.cpt) + (x.km ? " km" : " h") + '<br><span class="muted" style="font-size:11px">au ' + fD(x.dRef) + "</span>" + (x.chg ? '<br><span class="pill p-warn">⟲ compteur changé</span>' : "") },
       { h: "Vidange à", n: 1, f: x => nb(x.cptPrev) + (x.km ? " km" : " h") }, { h: "Cycle vidange", f: x => "<b>" + esc(gpCycle(x.code, x.cptPrev, x.km).txt || "–") + "</b>" }, { h: "Rythme", n: 1, f: x => nb(Math.round(x.rate * 10) / 10) + (x.km ? " km" : " h") + "/j" },
       { h: "État", f: x => '<span class="pill ' + (x.ret ? "p-crit" : x.dPrev <= addJ(today(), 7) ? "p-warn" : "p-acc") + '">' + esc(gpEtat(x)) + "</span>" + (x.ret && x.reste <= 0 ? '<br><span class="muted" style="font-size:11px">dépassée de ' + nb(-x.reste) + "</span>" : "") },
+      { h: "Atelier", f: x => '<select class="gp-at" data-code="' + esc(x.code) + '" title="Atelier qui fait la vidange (par défaut selon la famille)" style="width:auto;padding:2px 4px;font-size:12px">' + Object.entries(GP_AT).map(([k, t]) => '<option value="' + k + '"' + (gpAt(x) === k ? " selected" : "") + ">" + t + (gpAtFam(x) === k ? " (défaut)" : "") + "</option>").join("") + "</select>" },
       { h: "", f: x => '<button type="button" class="btn small" data-act="ge-gamme" data-id="' + esc(x.code) + '" data-cyc="' + gpCycle(x.code, x.cptPrev, x.km).ci + '" title="Filtres à préparer pour ce cycle">Gamme</button>' }];
-    if (per.t === "jour") h += '<div class="panel"><h3>Vidanges du ' + fD(per.d1) + "</h3>" + table(cols, L, { empty: "Aucune vidange prévue ce jour.", limit: 500 }) + "</div>";
-    else { const days = []; for (let d = per.d1; d <= per.d2; d = addJ(d, 1)) days.push(d); const ret = L.filter(x => x.ret);
-      if (ret.length) h += '<div class="panel"><h3>En retard – à rattraper <small>' + ret.length + "</small></h3>" + table(cols, ret, { limit: 500 }) + "</div>";
-      const parJ = days.map(d => [d, L.filter(x => !x.ret && x.dPrev === d)]).filter(([, l]) => l.length);
-      h += '<div class="panel"><h3>Vidanges prévues par jour <small>' + nb(L.length - ret.length) + "</small></h3>" + (parJ.length ? parJ.map(([d, l]) => "<h4>" + esc(new Date(Date.parse(d)).toLocaleDateString("fr-FR", { weekday: "long", timeZone: "UTC" })) + " " + fD(d) + ' <small class="muted">' + l.length + " vidange(s)</small></h4>" + table(cols, l, { limit: 500 })).join("") : '<div class="empty">Aucune vidange prévue sur la période.</div>') + "</div>"; }
+    const bloc = (L, ttl) => { if (per.t === "jour") return '<div class="panel"><h3>' + ttl + " – vidanges du " + fD(per.d1) + " <small>" + L.length + "</small></h3>" + table(cols, L, { empty: "Aucune vidange prévue ce jour.", limit: 500 }) + "</div>";
+      const days = []; for (let d = per.d1; d <= per.d2; d = addJ(d, 1)) days.push(d); const ret = L.filter(x => x.ret), parJ = days.map(d => [d, L.filter(x => !x.ret && x.dPrev === d)]).filter(([, l]) => l.length);
+      return '<div class="panel"><h3>' + ttl + " <small>" + L.length + " vidange(s)" + (ret.length ? " · " + ret.length + " en retard" : "") + "</small></h3>" + (ret.length ? '<h4 class="reste">En retard – à rattraper (' + ret.length + ")</h4>" + table(cols, ret, { limit: 500 }) : "") +
+        (parJ.length ? parJ.map(([d, l]) => "<h4>" + esc(new Date(Date.parse(d)).toLocaleDateString("fr-FR", { weekday: "long", timeZone: "UTC" })) + " " + fD(d) + ' <small class="muted">' + l.length + " vidange(s)</small></h4>" + table(cols, l, { limit: 500 })).join("") : (ret.length ? "" : '<div class="empty">Aucune vidange prévue sur la période.</div>')) + "</div>"; };
+    if (per.t === "mois") h += bloc(L, "Vidanges du mois");
+    else { h += '<div class="kpis">' + Object.entries(GP_AT).map(([k, t]) => { const n = L.filter(x => gpAt(x) === k).length; return k === "NA" && !n ? "" : kpi(t, nb(n), k === "NA" ? "warn" : "txt"); }).join("") + "</div>";
+      for (const k of Object.keys(GP_AT)) { const l = L.filter(x => gpAt(x) === k); if (k === "NA" && !l.length) continue; h += bloc(l, "🔧 " + GP_AT[k]); } }
     h += '<div class="panel"><h3>Planning complet des engins</h3>' + gePlanningHtml(P) + "</div>";
     return h + '<p class="hint">Date prévue calculée à partir du compteur actuel, de la prochaine vidange et du rythme d\'utilisation de chaque engin (voir explication sous le planning complet). Sur une semaine ou un mois, un engin très utilisé peut avoir plusieurs vidanges (tous les « intervalle ÷ rythme » jours). Les engins en retard figurent dans « à rattraper ».</p>'; } };
 async function gpExport(kind) { if (!GE.loaded) return toast("Reportings en cours de chargement…");
-  const per = gpPeriode(), L = gpListe(gePlanning(), per), u = x => x.km ? " km" : " h", nom = "Planning_vidanges_" + per.t + "_" + per.d1 + (per.d2 !== per.d1 ? "_" + per.d2 : "");
+  const per = gpPeriode(), L0 = gpListe(gePlanning(), per), AK = Object.keys(GP_AT), L = per.t === "mois" ? L0 : L0.map((x, i) => [x, i]).sort((a, b) => AK.indexOf(gpAt(a[0])) - AK.indexOf(gpAt(b[0])) || a[1] - b[1]).map(a => a[0]), u = x => x.km ? " km" : " h", nom = "Planning_vidanges_" + per.t + "_" + per.d1 + (per.d2 !== per.d1 ? "_" + per.d2 : "");
   const rows = L.map(x => [fD(x.dPrev), x.code, gpCat(x), gpTyp(x), x.cpt === null ? "" : nb(x.cpt) + u(x), nb(x.cptPrev) + u(x), gpCycle(x.code, x.cptPrev, x.km).txt, nb(Math.round(x.rate * 10) / 10) + u(x) + "/j", gpEtat(x), ""]);
   const head = ["Date prévue", "Code", "Catégorie", "Type", "Compteur actuel", "Vidange à", "Cycle vidange", "Rythme", "État", "Réalisée (date / compteur / visa)"];
   if (!L.length) toast("Aucune vidange sur la période : le fichier sera vide.");
@@ -1956,16 +1972,20 @@ async function gpExport(kind) { if (!GE.loaded) return toast("Reportings en cour
     ws.columns = [12, 10, 26, 18, 16, 14, 13, 12, 24, 30].map(w => ({ width: w })); const thin = { style: "thin" }, bd = { top: thin, left: thin, bottom: thin, right: thin };
     ws.addRow(["PLANNING DES VIDANGES – " + per.txt]).font = { bold: true, size: 13 }; ws.addRow([(S.params.nom_chantier || "") + " · édité le " + fD(today())]).font = { size: 9, color: { argb: "FF666666" } }; ws.addRow([]);
     const hr = ws.addRow(head); hr.eachCell(c => { c.font = { bold: true, color: { argb: "FFFFFFFF" } }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0F4C5C" } }; c.border = bd; c.alignment = { horizontal: "center", vertical: "middle", wrapText: true }; });
-    L.forEach((x, i) => { const r = ws.addRow(rows[i]); r.eachCell({ includeEmpty: true }, c => { c.border = bd; c.alignment = { vertical: "middle", wrapText: true }; }); r.getCell(7).font = { bold: true }; if (x.ret) r.getCell(9).font = { bold: true, color: { argb: "FFB42318" } }; });
+    L.forEach((x, i) => { if (per.t !== "mois" && (i === 0 || gpAt(L[i - 1]) !== gpAt(x))) { const k = gpAt(x), g = ws.addRow([GP_AT[k].toUpperCase() + " – " + L.filter(y => gpAt(y) === k).length + " vidange(s)"]); ws.mergeCells(g.number, 1, g.number, head.length);
+        g.getCell(1).font = { bold: true, color: { argb: "FFFFFFFF" } }; g.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F3864" } }; g.height = 18; }
+      const r = ws.addRow(rows[i]); r.eachCell({ includeEmpty: true }, c => { c.border = bd; c.alignment = { vertical: "middle", wrapText: true }; }); r.getCell(7).font = { bold: true }; if (x.ret) r.getCell(9).font = { bold: true, color: { argb: "FFB42318" } }; });
     ws.views = [{ state: "frozen", ySplit: 4 }]; saveBlob(new Blob([await wb.xlsx.writeBuffer()], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), nom + ".xlsx"); return; }
   await loadScript("vendor/jspdf.umd.min.js"); await loadScript("vendor/jspdf.plugin.autotable.min.js");
   const { jsPDF } = window.jspdf, doc = new jsPDF({ unit: "mm", format: "a4", orientation: "landscape" }), W = 297, sp = v => String(v).replace(/[\u00a0\u202f]/g, " ");
   doc.setFillColor(15, 76, 92); doc.rect(0, 0, W, 22, "F"); doc.setTextColor(255); doc.setFont("helvetica", "bold"); doc.setFontSize(15); doc.text("PLANNING DES VIDANGES", 14, 10);
   doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.text(sp(S.params.nom_chantier || ""), 14, 17); doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.text(sp(per.txt), W - 14, 10, { align: "right" });
   doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.text(sp(L.length + " vidange(s) · " + L.filter(x => x.ret).length + " en retard · édité le " + fD(today())), W - 14, 17, { align: "right" });
-  doc.autoTable({ startY: 27, head: [head], body: rows.map(r => r.map(sp)), theme: "grid", styles: { fontSize: 8, cellPadding: 1.6, valign: "middle" }, headStyles: { fillColor: [15, 76, 92], textColor: 255, fontStyle: "bold" },
+  const body = [], idx = []; L.forEach((x, i) => { if (per.t !== "mois" && (i === 0 || gpAt(L[i - 1]) !== gpAt(x))) { const k = gpAt(x); body.push([{ content: sp(GP_AT[k].toUpperCase() + " – " + L.filter(y => gpAt(y) === k).length + " vidange(s)"), colSpan: head.length }]); idx.push(-1); } body.push(rows[i].map(sp)); idx.push(i); });
+  doc.autoTable({ startY: 27, head: [head], body, theme: "grid", styles: { fontSize: 8, cellPadding: 1.6, valign: "middle" }, headStyles: { fillColor: [15, 76, 92], textColor: 255, fontStyle: "bold" },
     columnStyles: { 0: { cellWidth: 20 }, 1: { cellWidth: 16, fontStyle: "bold" }, 4: { halign: "right" }, 5: { halign: "right", fontStyle: "bold" }, 6: { halign: "center", fontStyle: "bold" }, 7: { halign: "right" }, 9: { cellWidth: 42 } }, margin: { left: 10, right: 10 },
-    didParseCell: d => { if (d.section === "body" && d.column.index === 8 && L[d.row.index] && L[d.row.index].ret) { d.cell.styles.textColor = [180, 35, 24]; d.cell.styles.fontStyle = "bold"; } },
+    didParseCell: d => { if (d.section === "body" && idx[d.row.index] === -1) { d.cell.styles.fillColor = [31, 56, 100]; d.cell.styles.textColor = 255; d.cell.styles.fontStyle = "bold"; d.cell.styles.fontSize = 9.5; return; }
+      if (d.section === "body" && d.column.index === 8 && L[idx[d.row.index]] && L[idx[d.row.index]].ret) { d.cell.styles.textColor = [180, 35, 24]; d.cell.styles.fontStyle = "bold"; } },
     didDrawPage: () => { doc.setFontSize(7.5); doc.setTextColor(120); doc.text("Page " + doc.getNumberOfPages(), W - 14, 205, { align: "right" }); } });
   doc.save(nom + ".pdf"); }
 /* ---------- rapport mensuel PDF (A3 paysage) : calendrier du mois + planning détaillé par semaine ---------- */
