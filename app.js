@@ -1800,7 +1800,7 @@ async function gePtCanevas(d1, nj) {
   const FIX = 2, last = FIX + nj * 2;
   ws.columns = [12, 32].concat(Array(nj * 2).fill(0).map((_, i) => i % 2 ? 7 : 11)).map(w => ({ width: w }));
   ws.mergeCells(1, 1, 1, last); const t = ws.getCell(1, 1); t.value = "CANEVAS DE POINTAGE DES COMPTEURS ENGINS"; t.font = { bold: true, size: 15, color: { argb: "FFFFFFFF" } }; t.fill = fill("FF1F3864"); t.alignment = { horizontal: "center", vertical: "middle" }; ws.getRow(1).height = 26;
-  ws.getCell(2, 1).value = "Chantier :"; ws.getCell(2, 2).value = S.params.nom_chantier || ""; ws.getCell(2, 3).value = "Mois : " + (d1 ? moisTxt(d1.slice(0, 7)) : "");
+  ws.getCell(2, 1).value = "Chantier :"; ws.getCell(2, 2).value = S.params.nom_chantier || ""; ws.getCell(2, 3).value = "Mois : " + (d1 ? moisTxt(moisPt(d1)) + " (du " + fD(perMois(moisPt(d1)).d1) + " au " + fD(perMois(moisPt(d1)).d2) + ")" : "");
   if (last >= 6) { ws.getCell(2, 5).value = "Pointé par :"; ws.getCell(2, 5).font = { bold: true }; ws.mergeCells(2, 6, 2, Math.min(last, 8)); ws.getCell(2, 6).border = { bottom: thin }; } [1, 3].forEach(c => ws.getCell(2, c).font = { bold: true });
   ws.mergeCells(3, 1, 3, last); const n = ws.getCell(3, 1); n.value = "Saisir la DATE en tête de chaque jour (cases jaunes), puis pour chaque engin le COMPTEUR (heures ou km, voir Unité) et l'ÉTAT : M = Marche · AF = Arrêt facturé · ANF = Arrêt non facturé · P = Panne · TR = Transfert / hors chantier. Unité : heures, ou km pour les véhicules. Ne pas modifier les colonnes Code.";
   n.font = { italic: true, size: 9, color: { argb: "FF555555" } }; n.alignment = { wrapText: true, vertical: "middle" }; ws.getRow(3).height = 26;
@@ -1839,7 +1839,7 @@ function gePtParse(aoa, dDef) {
   let mois = null; for (let k = 0; k < si - 1; k++) for (const c of aoa[k] || []) { const d = xlDate(c); if (d) mois = mois || d.slice(0, 7); const m = String(c || "").match(/(janvier|f.vrier|mars|avril|mai|juin|juillet|ao.t|septembre|octobre|novembre|d.cembre)\s+(\d{4})/i); if (m && !mois) { const i = ["jan", "fev", "mar", "avr", "mai", "juin", "juil", "aou", "sep", "oct", "nov", "dec"].findIndex(x => nh(m[1]).startsWith(x)); if (i >= 0) mois = m[2] + "-" + String(i + 1).padStart(2, "0"); } }
   const pairs = []; S2.forEach((h, i) => { if (h === "compteur" && S2[i + 1] === "etat") { let d = xlDate(H1[i]) || xlDate(H1[i + 1]);
       if (!d) { const m = String(H1[i] ?? "").match(/^\s*(\d{1,2})[\/.-](\d{1,2})\s*$/), dn = typeof H1[i] === "number" && H1[i] >= 1 && H1[i] <= 31 ? H1[i] : null;
-        if (m && mois) d = mois.slice(0, 4) + "-" + m[2].padStart(2, "0") + "-" + m[1].padStart(2, "0"); else if (dn && mois) d = mois + "-" + String(dn).padStart(2, "0"); }
+        if (m && mois) d = mois.slice(0, 4) + "-" + m[2].padStart(2, "0") + "-" + m[1].padStart(2, "0"); else if (dn && mois) d = (dn >= 26 ? decMois(mois, -1) : mois) + "-" + String(dn).padStart(2, "0"); }   /* mois de pointage : jours 26-31 = mois précédent */
       pairs.push({ c: i, e: i + 1, d }); } });
   if (!pairs.length) throw new Error("Aucune colonne journalière (Compteur / Etat).");
   const out = [], inconnus = new Set(); let sansDate = 0;
@@ -2022,9 +2022,13 @@ function gePlanning() {
    PLANNING VIDANGES : vidanges prévues sur un jour, une semaine ou un mois (+ téléchargement PDF / Excel)
    ===================================================================== */
 const addJ = (iso, n) => new Date(Date.parse(iso) + n * 864e5).toISOString().slice(0, 10);
+/* mois de pointage : du 26 du mois précédent au 25 du mois (ex. novembre = 26/10 → 25/11) */
+const moisPt = iso => { const y = +iso.slice(0, 4), m = +iso.slice(5, 7); return +iso.slice(8, 10) >= 26 ? new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 7) : iso.slice(0, 7); };
+const perMois = key => { const y = +key.slice(0, 4), m = +key.slice(5, 7); return { d1: new Date(Date.UTC(y, m - 2, 26)).toISOString().slice(0, 10), d2: key + "-25" }; };
+const decMois = (key, n) => new Date(Date.UTC(+key.slice(0, 4), +key.slice(5, 7) - 1 + n, 1)).toISOString().slice(0, 7);
 function gpPeriode() { const t = S.f.gpType || "semaine", d = S.f.gpDate || today();
   if (t === "jour") return { t, d1: d, d2: d, txt: "Journée du " + fD(d) };
-  if (t === "mois") { const d1 = d.slice(0, 8) + "01", nx = new Date(Date.UTC(+d.slice(0, 4), +d.slice(5, 7), 0)).toISOString().slice(0, 10); return { t, d1, d2: nx, txt: "Mois de " + moisTxt(d.slice(0, 7)) }; }
+  if (t === "mois") { const key = moisPt(d), P = perMois(key); return { t, key, d1: P.d1, d2: P.d2, txt: "Mois de " + moisTxt(key) + " (du " + fD(P.d1) + " au " + fD(P.d2) + ")" }; }
   const wd = (new Date(Date.parse(d)).getUTCDay() + 6) % 7, d1 = addJ(d, -wd), d2 = addJ(d1, 6); return { t, d1, d2, txt: "Semaine du " + fD(d1) + " au " + fD(d2) }; }
 /* occurrences de vidange dans la période : 1re = date prévue (ou aujourd'hui si en retard), puis tous les « intervalle ÷ rythme » jours */
 function gpListe(P, per) { const out = [], auj = today();
@@ -2060,11 +2064,11 @@ const gpAt = x => { const o = S.params.ge_atelier || {}; return GP_AT[o[x.code]]
 VIEWS.gplan = { title: "Planning vidanges",
   tools() { const t = S.f.gpType || "semaine", b = (k, l) => '<button type="button" class="btn small' + (t === k ? " primary" : "") + '" data-act="gp-type" data-id="' + k + '">' + l + "</button>";
     return '<div class="tools"><div class="chips" style="align-self:flex-end">' + b("jour", "Jour") + b("semaine", "Semaine") + b("mois", "Mois") + "</div>" +
-      field("gp-date", t === "mois" ? "Mois" : t === "semaine" ? "Semaine contenant le" : "Jour", t === "mois" ? '<input type="month" id="gp-date" value="' + (S.f.gpDate || today()).slice(0, 7) + '">' : '<input type="date" id="gp-date" value="' + (S.f.gpDate || today()) + '">') +
+      field("gp-date", t === "mois" ? "Mois" : t === "semaine" ? "Semaine contenant le" : "Jour", t === "mois" ? '<input type="month" id="gp-date" value="' + moisPt(S.f.gpDate || today()) + '">' : '<input type="date" id="gp-date" value="' + (S.f.gpDate || today()) + '">') +
       '<div class="chips" style="align-self:flex-end"><button type="button" class="btn small" data-act="gp-nav" data-id="-1" title="Période précédente">◀</button><button type="button" class="btn small" data-act="gp-nav" data-id="0">Aujourd\'hui</button><button type="button" class="btn small" data-act="gp-nav" data-id="1" title="Période suivante">▶</button></div>' +
       '<span class="grow"></span><button class="btn" data-act="gp-xls">⬇ Excel</button><button class="btn primary" data-act="gp-pdf">⬇ PDF</button></div>'; },
   bind() {
-    const e = $("#gp-date"); if (e) e.onchange = () => { if (e.value) { S.f.gpDate = e.type === "month" ? e.value + "-01" : e.value; render(); } }; },
+    const e = $("#gp-date"); if (e) e.onchange = () => { if (e.value) { S.f.gpDate = e.type === "month" ? e.value + "-15" : e.value; render(); } }; },
   body() { if (!S.isAdmin) return '<div class="empty">Réservé aux administrateurs.</div>';
     if (!GE.loaded) { if (!GE.loading) geLoad(); return '<div class="empty">Chargement des reportings…</div>'; }
     if (!GE.mois.length) return '<div class="empty">Aucun reporting importé : ajoutez les reportings dans « Gestion engins ».</div>';
@@ -2127,7 +2131,7 @@ async function gpPdfMois(per, L, nom) {
   await loadScript("vendor/jspdf.umd.min.js"); await loadScript("vendor/jspdf.plugin.autotable.min.js");
   const { jsPDF } = window.jspdf, doc = new jsPDF({ unit: "mm", format: "a3", orientation: "landscape" }), W = 420, H = 297, M = 12, sp = v => String(v ?? "").replace(/[\u00a0\u202f]/g, " "), auj = today();
   const NAVY = [31, 56, 100], BLUE = [47, 84, 150], LBLUE = [217, 225, 242], YEL = [255, 252, 235], GREY = [217, 217, 217], LGREY = [236, 236, 236], RED = [255, 199, 206], ORA = [255, 229, 153];
-  const MOIS = moisTxt(per.d1.slice(0, 7)).toUpperCase(), chantier = S.params.nom_chantier || "";
+  const MOIS = moisTxt(per.key || per.d1.slice(0, 7)).toUpperCase(), chantier = S.params.nom_chantier || "";
   const bar = (txt, y, h, fs) => { doc.setFillColor(...NAVY); doc.rect(M, y, W - 2 * M, h, "F"); doc.setTextColor(255); doc.setFont("helvetica", "bold"); doc.setFontSize(fs); doc.text(sp(txt), W / 2, y + h / 2 + fs * 0.13, { align: "center" }); };
   const draw = (L, lab, first) => {
   /* ===== page 1 : calendrier ===== */
@@ -2396,8 +2400,8 @@ document.addEventListener("click", async e => { const b = e.target.closest("[dat
           const map = Object.assign({}, S.params.ge_proch || {}), x = ov.querySelector("#gp-pv-x");
           if (x && x.checked) delete map[id]; else { const v = N(fv(ov, "gp-pv")); if (!(v > 0)) return "Saisissez un compteur valide."; if (o.cpt !== null && v < o.cpt - (o.km ? 50000 : 2000)) return "Valeur trop basse par rapport au compteur actuel."; map[id] = { v, date: today() }; }
           const r = await must(sb.from("params").update({ ge_proch: map }).eq("id", 1).select().single()); S.params = Object.assign(S.params, r, { ge_proch: (r && r.ge_proch) || map }); toast("Vidange à enregistrée pour " + id + "."); render(); }, "Enregistrer"); return; }
-    if (a === "gp-type") { S.f.gpType = id; return render(); }
-    if (a === "gp-nav") { const t = S.f.gpType || "semaine", d = S.f.gpDate || today(); if (id === "0") S.f.gpDate = today(); else if (t === "mois") { const dt = new Date(Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1 + +id, 1)); S.f.gpDate = dt.toISOString().slice(0, 10); } else S.f.gpDate = addJ(d, (t === "jour" ? 1 : 7) * +id); return render(); }
+    if (a === "gp-type") { S.f.gpType = id; return render(true); }
+    if (a === "gp-nav") { const t = S.f.gpType || "semaine", d = S.f.gpDate || today(); if (id === "0") S.f.gpDate = today(); else if (t === "mois") { S.f.gpDate = decMois(moisPt(d), +id) + "-15"; } else S.f.gpDate = addJ(d, (t === "jour" ? 1 : 7) * +id); return render(true); }
     if (a === "gp-pdf" || a === "gp-xls") { gpExport(a === "gp-pdf" ? "pdf" : "xls").catch(err => toast("Téléchargement : " + errMsg(err))); return; }
     if (a === "ge-pl-f") { S.f.gePl = id || ""; return render(); }
     if (a === "ge-gamme") { S.f.gmCode = id; S.f.gmCodeIn = id; S.f.gmCyc = +(b.dataset.cyc || 0); go("gamme"); return; }
