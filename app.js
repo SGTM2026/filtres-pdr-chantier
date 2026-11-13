@@ -1675,15 +1675,15 @@ function gammeForm(g) { const isNew = !g; g = g || { mod: "", desc: "", fam: "",
    GESTION ENGINS (administrateur) : reporting mensuel du pointage (canevas « CANEVAS POINTAGE »),
    cumul des mois, taux de disponibilité / exploitation / panne, MTBF, MTTR, vidanges, fiche engin
    ===================================================================== */
-const GE = { loaded: false, loading: null, mois: [], eng: [], pan: [], mvt: [] };
+const GE = { loaded: false, loading: null, mois: [], eng: [], pan: [], mvt: [], pt: [] };
 const MOIS_L = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
 const moisTxt = m => m ? MOIS_L[+m.slice(5, 7) - 1] + " " + m.slice(0, 4) : "";
 const moisCourt = m => m ? MOIS_L[+m.slice(5, 7) - 1].slice(0, 4).replace(/\.$/, "") + ". " + m.slice(2, 4) : "";
 const GE_ETATS = { M: ["Marche", "var(--ok)"], AF: ["Arrêt facturé", "var(--petrol)"], ANF: ["Arrêt non facturé", "#8a8f96"], P: ["Panne", "var(--crit)"], TR: ["Transfert / hors chantier", "#d9dde1"] };
 function geLoad(force) {
   if (GE.loaded && !force) return Promise.resolve();
-  return GE.loading = Promise.all([fetchAll("rep_mois", "mois"), fetchAll("rep_engins", "id"), fetchAll("rep_pannes", "id"), fetchAll("rep_mouvements", "id")])
-    .then(([m, e, p, v]) => { GE.mois = m; GE.eng = e; GE.pan = p; GE.mvt = v; GE.loaded = true; GE.loading = null; if (S.view === "gengins" || S.view === "gplan") render(true); })
+  return GE.loading = Promise.all([fetchAll("rep_mois", "mois"), fetchAll("rep_engins", "id"), fetchAll("rep_pannes", "id"), fetchAll("rep_mouvements", "id"), fetchAll("cpt_pointage", "date").catch(() => [])])
+    .then(([m, e, p, v, t]) => { GE.mois = m; GE.eng = e; GE.pan = p; GE.mvt = v; GE.pt = t; GE.loaded = true; GE.loading = null; if (S.view === "gengins" || S.view === "gplan") render(true); })
     .catch(err => { GE.loading = null; toast("Reporting : " + errMsg(err)); });
 }
 /* --------- lecture du fichier « CANEVAS POINTAGE » --------- */
@@ -1771,7 +1771,8 @@ function geImportForm() {
       const old = (GE.mois.find(x => x.mois === key) || {}).fichier_path; if (old && old !== path) await sb.storage.from("reporting").remove([old]);
       await geSaveMonth(key, B, { fichier: file, fichier_path: path });
       S.f.geTo = key; if (!S.f.geFrom || S.f.geFrom > key) S.f.geFrom = key; await geLoad(true);
-      toast("Reporting de " + moisTxt(mois) + (exists ? " remplacé" : " ajouté") + " : " + B.eng.length + " engins, " + B.pan.length + " panne(s) déclarée(s), " + B.mvt.length + " mouvement(s)."); }, "Ajouter le reporting", true);
+      toast("Reporting de " + moisTxt(mois) + (exists ? " remplacé" : " ajouté") + " : " + B.eng.length + " engins, " + B.pan.length + " panne(s) déclarée(s), " + B.mvt.length + " mouvement(s).");
+      const cmp = gePtCompare(key); if (cmp.list.length) setTimeout(() => gePtCmpForm(key), 300); }, "Ajouter le reporting", true);
   const prev = () => { const box = ov.querySelector("#ge-prev"); if (!P) return; try {
       const B = geBuild(P, ov.querySelector("#ge-mois").value || today().slice(0, 7)), t = k => B.eng.reduce((s, x) => s + x[k], 0), ex = GE.mois.some(x => x.mois.slice(0, 7) === ov.querySelector("#ge-mois").value);
       box.innerHTML = '<div class="banner ' + (ex ? "crit" : "ok") + '">' + (ex ? "⚠ Ce mois existe déjà : il sera remplacé. " : "✔ ") + "Lu : <b>" + B.eng.length + "</b> engins · période du " + fD(B.debut) + " au " + fD(B.fin) + " · " + nb(t("j_m")) + " j marche · " + nb(t("j_af") + t("j_anf")) + " j arrêt · " + nb(t("j_panne")) + " j panne · <b>" + B.pan.length + "</b> panne(s) déclarée(s) · " + B.mvt.length + " mouvement(s).</div>"; }
@@ -1780,6 +1781,120 @@ function geImportForm() {
   ov.querySelector("#ge-file").addEventListener("change", async e => { const f = e.target.files[0], box = ov.querySelector("#ge-prev"); P = null; box.innerHTML = ""; if (!f) return; file = f.name; fileObj = f;
     try { P = geParse(XLSX.read(await f.arrayBuffer(), { type: "array" })); if (P.dateRef) ov.querySelector("#ge-mois").value = P.dateRef.slice(0, 7); prev(); }
     catch (err) { box.innerHTML = '<div class="banner crit">' + esc(errMsg(err)) + "</div>"; } });
+}
+/* =====================================================================
+   SAISIE COMPTEUR : pointage de quelques jours (canevas Excel) en attendant le reporting de fin de mois
+   ===================================================================== */
+const PT_ETATS = ["M", "AF", "ANF", "P", "TR"];
+/* dernier compteur connu d'un engin (reporting, pointage, Suivi huiles) */
+function geLastCpt(code) { let best = null; const add = (d, c, src) => { if (N(c) > 0 && d && (!best || d > best.d)) best = { d, c: N(c), src }; };
+  for (const r of GE.eng) if (r.code === code) add((GE.mois.find(x => x.mois === r.mois) || {}).fin, r.cpt_fin, "Reporting");
+  for (const t of GE.pt) if (t.code === code) add(t.date, t.compteur, "Pointage");
+  for (const c of S.hCon.values()) if (c.engin === code) add(c.date, c.compteur, "Suivi huiles");
+  return best; }
+const geUnite = code => { const r = GE.eng.filter(x => x.code === code).sort((a, b) => b.mois.localeCompare(a.mois))[0]; return r ? r.unite || "h" : "h"; };
+async function gePtCanevas(d1, nj) {
+  await loadScript("vendor/exceljs.min.js"); const wb = new ExcelJS.Workbook(); wb.creator = APPNAME;
+  const ws = wb.addWorksheet("POINTAGE", { pageSetup: { paperSize: 8, orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0, printTitlesRow: "5:6" } });
+  const thin = { style: "thin", color: { argb: "FF8FAADC" } }, bd = { top: thin, left: thin, bottom: thin, right: thin }, fill = c => ({ type: "pattern", pattern: "solid", fgColor: { argb: c } });
+  const FIX = 6, last = FIX + nj * 2;
+  ws.columns = [10, 28, 28, 7, 13, 12].concat(Array(nj * 2).fill(0).map((_, i) => i % 2 ? 7 : 11)).map(w => ({ width: w }));
+  ws.mergeCells(1, 1, 1, last); const t = ws.getCell(1, 1); t.value = "CANEVAS DE POINTAGE DES COMPTEURS ENGINS"; t.font = { bold: true, size: 15, color: { argb: "FFFFFFFF" } }; t.fill = fill("FF1F3864"); t.alignment = { horizontal: "center", vertical: "middle" }; ws.getRow(1).height = 26;
+  ws.getCell(2, 1).value = "Chantier :"; ws.getCell(2, 2).value = S.params.nom_chantier || ""; ws.getCell(2, 3).value = "Mois : " + (d1 ? moisTxt(d1.slice(0, 7)) : "");
+  ws.getCell(2, 4).value = "Pointé par :"; ws.mergeCells(2, 5, 2, 6); ws.getCell(2, 5).border = { bottom: thin }; [1, 3, 4].forEach(c => ws.getCell(2, c).font = { bold: true });
+  ws.mergeCells(3, 1, 3, last); const n = ws.getCell(3, 1); n.value = "Saisir la DATE en tête de chaque jour (cases jaunes), puis pour chaque engin le COMPTEUR (heures ou km, voir Unité) et l'ÉTAT : M = Marche · AF = Arrêt facturé · ANF = Arrêt non facturé · P = Panne · TR = Transfert / hors chantier. Ne pas modifier les colonnes Code.";
+  n.font = { italic: true, size: 9, color: { argb: "FF555555" } }; n.alignment = { wrapText: true, vertical: "middle" }; ws.getRow(3).height = 26;
+  const H = ["Code", "Engin", "Famille_Engin", "Unité", "Dernier compteur connu", "Date dernier compteur"];
+  H.forEach((h, i) => { ws.mergeCells(5, i + 1, 6, i + 1); const c = ws.getCell(5, i + 1); c.value = h; });
+  for (let k = 0; k < nj; k++) { const c0 = FIX + 1 + k * 2; ws.mergeCells(5, c0, 5, c0 + 1); const c = ws.getCell(5, c0); c.value = d1 ? new Date(Date.parse(addJ(d1, k))) : null; c.numFmt = "dd/mm/yyyy";
+    c.dataValidation = { type: "date", operator: "greaterThan", allowBlank: true, formulae: [new Date(Date.UTC(2020, 0, 1))], showErrorMessage: true, error: "Saisir une date (jj/mm/aaaa)." };
+    ws.getCell(6, c0).value = "Compteur"; ws.getCell(6, c0 + 1).value = "Etat"; }
+  for (const r of [5, 6]) for (let c = 1; c <= last; c++) { const x = ws.getCell(r, c); x.font = { bold: true, color: { argb: c > FIX && r === 5 ? "FF1F3864" : "FFFFFFFF" } }; x.fill = fill(c > FIX && r === 5 ? "FFFFF2CC" : "FF2F5496"); x.border = bd; x.alignment = { horizontal: "center", vertical: "middle", wrapText: true }; }
+  ws.getRow(5).height = 22; ws.getRow(6).height = 18;
+  const fam = x => (S.inv.get(x) || {}).famille || ((GE.eng.find(r => r.code === x)) || {}).famille || "";
+  const codes = [...S.inv.keys()].sort((a, b) => fam(a).localeCompare(fam(b)) || a.localeCompare(b));
+  codes.forEach((code, i) => { const v = S.inv.get(code) || {}, lc = geLastCpt(code), row = ws.addRow([code, v.gamme || "", fam(code), geUnite(code), lc ? lc.c : null, lc ? new Date(Date.parse(lc.d)) : null]);
+    row.eachCell({ includeEmpty: true }, (c, ci) => { if (ci > last) return; c.border = bd; c.alignment = { vertical: "middle", horizontal: ci <= 1 || ci === 4 || ci > FIX ? "center" : ci === 5 ? "right" : "left" };
+      if (ci <= FIX) c.fill = fill(i % 2 ? "FFF2F5FA" : "FFFFFFFF"); });
+    for (let c = last; c > FIX; c--) { const x = row.getCell(c); x.border = bd; }
+    row.getCell(1).font = { bold: true }; row.getCell(5).numFmt = "# ##0"; row.getCell(6).numFmt = "dd/mm/yyyy"; row.getCell(5).font = row.getCell(6).font = { color: { argb: "FF777777" }, size: 9 }; });
+  const r1 = 7, r2 = 6 + codes.length;
+  for (let k = 0; k < nj; k++) { const cc = FIX + 1 + k * 2, L = c => ws.getColumn(c).letter;
+    ws.dataValidations.add(L(cc) + r1 + ":" + L(cc) + r2, { type: "decimal", operator: "greaterThanOrEqual", allowBlank: true, formulae: [0], showErrorMessage: true, error: "Compteur : nombre positif (heures ou km)." });
+    ws.dataValidations.add(L(cc + 1) + r1 + ":" + L(cc + 1) + r2, { type: "list", allowBlank: true, formulae: ['"' + PT_ETATS.join(",") + '"'], showErrorMessage: true, error: "État : M, AF, ANF, P ou TR." }); }
+  ws.views = [{ state: "frozen", xSplit: 2, ySplit: 6 }]; ws.autoFilter = { from: { row: 6, column: 1 }, to: { row: 6, column: FIX } };
+  const h = wb.addWorksheet("Mode d'emploi"); h.columns = [{ width: 110 }];
+  ["CANEVAS DE POINTAGE – MODE D'EMPLOI", "", "1. Écrire la date de chaque jour pointé dans les cases jaunes (une colonne Compteur + État par jour, jusqu'à " + nj + " jours par fichier).", "2. Pour chaque engin, saisir le compteur lu (heures ou km, voir la colonne Unité) et l'état du jour.",
+    "3. Laisser vide un engin non pointé. Ne pas supprimer ni modifier les colonnes Code.", "4. Importer le fichier dans le site : Gestion engins › ⏱ Saisie compteur › Pointage Excel. Les dates sont lues automatiquement.",
+    "5. Réimporter un même jour remplace les compteurs déjà saisis pour ce jour.", "", "États :", "M = Marche", "AF = Arrêt facturé", "ANF = Arrêt non facturé", "P = Panne", "TR = Transfert / hors chantier", "",
+    "« Dernier compteur connu » : dernier compteur enregistré dans le site à la date d'export (aide à repérer une erreur de saisie)."].forEach((x, i) => { const r = h.addRow([x]); if (i === 0) r.font = { bold: true, size: 13 }; if (x === "États :") r.font = { bold: true }; });
+  saveBlob(new Blob([await wb.xlsx.writeBuffer()], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), "Canevas_pointage_compteurs" + (d1 ? "_" + d1 : "") + ".xlsx"); }
+/* lecture d'un canevas de pointage (le nôtre ou l'ancien CANVA POINTAGE) */
+function gePtParse(aoa, dDef) {
+  const si = aoa.findIndex(r => r && r.filter(c => nh(c) === "compteur").length && r.some(c => nh(c) === "etat")); if (si < 0) throw new Error("Ligne « Compteur / Etat » introuvable dans le fichier.");
+  const S2 = aoa[si].map(nh), H1 = aoa[si - 1] || [], hi = [si, si - 1].find(k => (aoa[k] || []).some(c => nh(c) === "code")); if (hi === undefined) throw new Error("Colonne « Code » introuvable.");
+  const ci = aoa[hi].findIndex(c => nh(c) === "code");
+  let mois = null; for (let k = 0; k < si - 1; k++) for (const c of aoa[k] || []) { const d = xlDate(c); if (d) mois = mois || d.slice(0, 7); const m = String(c || "").match(/(janvier|f.vrier|mars|avril|mai|juin|juillet|ao.t|septembre|octobre|novembre|d.cembre)\s+(\d{4})/i); if (m && !mois) { const i = ["jan", "fev", "mar", "avr", "mai", "juin", "juil", "aou", "sep", "oct", "nov", "dec"].findIndex(x => nh(m[1]).startsWith(x)); if (i >= 0) mois = m[2] + "-" + String(i + 1).padStart(2, "0"); } }
+  const pairs = []; S2.forEach((h, i) => { if (h === "compteur" && S2[i + 1] === "etat") { let d = xlDate(H1[i]) || xlDate(H1[i + 1]);
+      if (!d) { const m = String(H1[i] ?? "").match(/^\s*(\d{1,2})[\/.-](\d{1,2})\s*$/), dn = typeof H1[i] === "number" && H1[i] >= 1 && H1[i] <= 31 ? H1[i] : null;
+        if (m && mois) d = mois.slice(0, 4) + "-" + m[2].padStart(2, "0") + "-" + m[1].padStart(2, "0"); else if (dn && mois) d = mois + "-" + String(dn).padStart(2, "0"); }
+      pairs.push({ c: i, e: i + 1, d }); } });
+  if (!pairs.length) throw new Error("Aucune colonne journalière (Compteur / Etat).");
+  const out = [], inconnus = new Set(); let sansDate = 0;
+  for (const r of aoa.slice(si + 1)) { if (!r) continue; const code = String(r[ci] ?? "").trim(); if (!/^\d{3,7}$/.test(code)) continue;
+    for (const p of pairs) { const c = xlCpt(r[p.c]), e = String(r[p.e] ?? "").trim().toUpperCase(); if (c === null && !e) continue; const d = p.d || dDef; if (!d) { sansDate++; continue; }
+      if (S.inv.size && !S.inv.has(code)) inconnus.add(code); out.push({ code, date: d, compteur: c, etat: PT_ETATS.includes(e) ? e : (e || null) }); } }
+  return { rows: out, dates: [...new Set(out.map(x => x.date))].sort(), pairs, sansDate, inconnus: [...inconnus], blocsSansDate: pairs.filter(p => !p.d).length }; }
+/* comparaison pointage ↔ reporting d'un mois (même jour, même engin) */
+function gePtCompare(key) { const m = GE.mois.find(x => x.mois === key), list = []; let n = 0; if (!m) return { list, n };
+  const byCode = new Map(GE.eng.filter(r => r.mois === key).map(r => [r.code, r]));
+  for (const t of GE.pt) { if (!inPeriod(t.date, m.debut, m.fin)) continue; const r = byCode.get(t.code); if (!r || !r.etats) continue; const i = Math.round((Date.parse(t.date) - Date.parse(m.debut)) / 864e5), e = r.etats[i]; if (!e) continue; n++;
+    const cr = N(e[1]) > 0 ? N(e[1]) : null, er = e[0] ? String(e[0]).toUpperCase() : null, dc = t.compteur !== null && cr !== null ? N(t.compteur) - cr : null;
+    const pbC = t.compteur !== null && (cr === null || Math.abs(dc) > 0), pbE = t.etat && er && t.etat !== er;
+    if (pbC || pbE) list.push({ code: t.code, date: t.date, cp: t.compteur, cr, dc, ep: t.etat, er, des: r.designation, km: geKm(r) }); }
+  return { list: list.sort((a, b) => a.date.localeCompare(b.date) || a.code.localeCompare(b.code)), n }; }
+function gePtCmpForm(key) { const c = gePtCompare(key), u = x => x.km ? " km" : " h";
+  modal("Pointage ↔ reporting – " + moisTxt(key), '<p class="muted" style="margin-top:0">' + c.n + " lecture(s) du pointage comparée(s) au reporting du même jour · <b>" + c.list.length + "</b> écart(s).</p>" +
+    table([{ h: "Date", f: x => fD(x.date) }, { h: "Code", f: x => mono(x.code) }, { h: "Engin", f: x => esc(x.des || "") }, { h: "Compteur pointage", n: 1, f: x => x.cp === null ? "–" : nb(x.cp) + u(x) }, { h: "Compteur reporting", n: 1, f: x => x.cr === null ? '<span class="muted">vide</span>' : nb(x.cr) + u(x) },
+      { h: "Écart", n: 1, f: x => x.dc === null ? "–" : '<b class="' + (Math.abs(x.dc) > (x.km ? 200 : 10) ? "reste" : "") + '">' + (x.dc > 0 ? "+" : "") + nb(x.dc) + "</b>" }, { h: "État pointage / reporting", f: x => (x.ep || "–") + " / " + (x.er || "–") + (x.ep && x.er && x.ep !== x.er ? ' <span class="pill p-warn">différent</span>' : "") }],
+      c.list, { empty: "Aucun écart : le pointage correspond au reporting.", limit: 1000 }) + '<p class="hint">Écart = compteur du pointage − compteur du reporting le même jour. Le reporting reste la référence des calculs ; corrigez le fichier de pointage ou le reporting si besoin.</p>', async () => {}, "Fermer", true); }
+function gePtForm() {
+  let R = null, aoa = null, file = "";
+  const dts = [...new Set(GE.pt.map(t => t.date))].sort().reverse().slice(0, 40);
+  const hist = dts.length ? table([{ h: "Date de pointage", f: d => "<b>" + fD(d) + "</b>" }, { h: "Engins pointés", n: 1, f: d => nb(GE.pt.filter(t => t.date === d).length) }, { h: "Fichier", f: d => esc((GE.pt.find(t => t.date === d) || {}).fichier || "") },
+      { h: "", f: d => '<button type="button" class="btn small danger" data-ptdel="' + d + '">Supprimer</button>' }], dts, { limit: 40 }) : '<div class="empty">Aucun pointage enregistré.</div>';
+  const cmpM = GE.mois.filter(m => GE.pt.some(t => inPeriod(t.date, m.debut, m.fin))).sort((a, b) => b.mois.localeCompare(a.mois));
+  const ov = modal("Saisie compteur – pointage journalier", '<p class="muted" style="margin-top:0">Saisissez les compteurs de quelques jours sans attendre le reporting de fin de mois : ils servent au suivi des engins et au planning des vidanges. À l\'import du reporting, les compteurs pointés sont comparés à ceux du reporting du même jour.</p>' +
+    '<div class="panel" style="margin:0 0 10px"><h3>1. Exporter le canevas de pointage</h3><div class="fgrid">' + F("pt-d1", "Premier jour (facultatif)", '<input id="pt-d1" type="date">') + F("pt-nj", "Nombre de jours", '<select id="pt-nj">' + [1, 2, 3, 4, 5, 6, 7].map(n => '<option' + (n === 7 ? " selected" : "") + ">" + n + "</option>").join("") + "</select>") +
+    '<div style="align-self:flex-end"><button type="button" class="btn" id="pt-exp">⬇ Exporter canevas de pointage</button></div></div><div class="hint">Canevas vide, avec les ' + S.inv.size + " engins de l'inventaire actuel (Code, Engin, Famille). Sans premier jour, les dates sont à écrire dans le fichier.</div></div>" +
+    '<div class="panel" style="margin:0 0 10px"><h3>2. Importer le pointage</h3><div class="fgrid">' + F("pt-file", "Pointage Excel *", '<input id="pt-file" type="file" accept=".xlsx,.xlsm,.xls">') + F("pt-dates", "Date(s) de pointage", '<input id="pt-dates" readonly placeholder="lue(s) dans le fichier">') +
+    '<div id="pt-dd" style="display:none">' + F("pt-ddef", "Date du pointage *", '<input id="pt-ddef" type="date">') + '</div></div><div id="pt-prev"></div></div>' +
+    '<div class="panel" style="margin:0"><h3>Pointages enregistrés</h3>' + hist + (cmpM.length ? '<div style="margin-top:8px">Comparer au reporting : ' + cmpM.map(m => '<button type="button" class="btn small" data-ptcmp="' + m.mois + '">' + esc(moisTxt(m.mois)) + "</button>").join(" ") + "</div>" : "") + "</div>",
+    async ov => { if (!aoa) return "Choisissez le fichier de pointage."; const ddef = fv(ov, "pt-ddef"); R = gePtParse(aoa, ddef || null);
+      if (R.blocsSansDate && !ddef && R.sansDate) return "Certaines colonnes n'ont pas de date : indiquez la date du pointage.";
+      if (!R.rows.length) return "Aucun compteur ni état trouvé dans le fichier.";
+      const rows = R.rows.map(x => Object.assign(x, { fichier: file }));
+      for (let i = 0; i < rows.length; i += 300) await must(sb.from("cpt_pointage").upsert(rows.slice(i, i + 300), { onConflict: "code,date" }).select("id"));
+      await geLoad(true); toast("Pointage enregistré : " + rows.length + " lecture(s) · " + R.dates.map(fD).join(", ") + "."); }, "Enregistrer le pointage", true);
+  const prev = () => { const box = ov.querySelector("#pt-prev"); if (!aoa) return; try { const ddef = ov.querySelector("#pt-ddef").value || null; R = gePtParse(aoa, ddef);
+      ov.querySelector("#pt-dd").style.display = R.blocsSansDate ? "" : "none"; ov.querySelector("#pt-dates").value = R.dates.map(fD).join(", ");
+      const bas = R.rows.filter(x => { if (x.compteur === null) return false; const l = geLastCpt(x.code); return l && l.d <= x.date && x.compteur < l.c; }), ex = R.dates.filter(d => GE.pt.some(t => t.date === d));
+      const nE = new Set(R.rows.map(x => x.code)).size, bad = R.rows.filter(x => x.etat && !PT_ETATS.includes(x.etat));
+      box.innerHTML = '<div class="banner ' + (R.rows.length ? "ok" : "crit") + '">' + (R.rows.length ? "✔ " : "⚠ ") + "<b>" + R.rows.length + "</b> lecture(s) · <b>" + nE + "</b> engin(s) · " + R.dates.length + " jour(s)" + (R.dates.length ? " : " + R.dates.map(fD).join(", ") : "") + "</div>" +
+        (R.blocsSansDate ? '<div class="banner warn">' + R.blocsSansDate + " colonne(s) jour sans date dans le fichier" + (R.sansDate ? " : indiquez la date du pointage ci-dessus (" + R.sansDate + " lecture(s) en attente)." : ".") + "</div>" : "") +
+        (ex.length ? '<div class="banner warn">Déjà pointé : ' + ex.map(fD).join(", ") + " — les compteurs de ces jours seront remplacés.</div>" : "") +
+        (R.inconnus.length ? '<div class="banner warn">Codes absents de l\'inventaire (enregistrés quand même) : ' + R.inconnus.map(esc).join(", ") + "</div>" : "") +
+        (bad.length ? '<div class="banner warn">État non reconnu (M, AF, ANF, P, TR) : ' + bad.slice(0, 10).map(x => esc(x.code + " " + x.etat)).join(", ") + "</div>" : "") +
+        (bas.length ? '<div class="banner warn">⚠ Compteur plus bas que le dernier connu (erreur de saisie ou compteur changé) : ' + bas.slice(0, 15).map(x => { const l = geLastCpt(x.code); return esc(x.code) + " " + nb(x.compteur) + " &lt; " + nb(l.c) + " (" + fD(l.d) + ")"; }).join(" · ") + (bas.length > 15 ? " …" : "") + "</div>" : ""); }
+    catch (err) { box.innerHTML = '<div class="banner crit">' + esc(errMsg(err)) + "</div>"; } };
+  ov.querySelector("#pt-exp").onclick = () => { const d1 = ov.querySelector("#pt-d1").value || null, nj = +ov.querySelector("#pt-nj").value; gePtCanevas(d1, nj).catch(err => toast("Canevas : " + errMsg(err))); };
+  ov.querySelector("#pt-ddef").addEventListener("change", prev);
+  ov.querySelector("#pt-file").addEventListener("change", async e => { const f = e.target.files[0]; aoa = null; ov.querySelector("#pt-prev").innerHTML = ""; ov.querySelector("#pt-dates").value = ""; if (!f) return; file = f.name;
+    try { const wb = XLSX.read(await f.arrayBuffer(), { type: "array" }); const k = wb.SheetNames.find(n => /point/i.test(n)) || wb.SheetNames[0]; aoa = XLSX.utils.sheet_to_json(wb.Sheets[k], { header: 1, raw: true, defval: null }); prev(); }
+    catch (err) { ov.querySelector("#pt-prev").innerHTML = '<div class="banner crit">' + esc(errMsg(err)) + "</div>"; } });
+  ov.addEventListener("click", e => { const b = e.target.closest("[data-ptdel],[data-ptcmp]"); if (!b) return; e.preventDefault();
+    if (b.dataset.ptcmp) return gePtCmpForm(b.dataset.ptcmp);
+    const d = b.dataset.ptdel; confirmBox("Supprimer le pointage du " + fD(d) + " (" + GE.pt.filter(t => t.date === d).length + " engin(s)) ?", async () => { await must(sb.from("cpt_pointage").delete().eq("date", d).select("id")); await geLoad(true); ov.remove(); toast("Pointage du " + fD(d) + " supprimé."); gePtForm(); }); });
 }
 /* --------- calculs --------- */
 const geSel = () => { const L = GE.mois.map(x => x.mois).sort(); if (!L.length) return []; let f = S.f.geFrom, t = S.f.geTo; if (!L.includes(t)) t = L[L.length - 1]; if (!L.includes(f)) f = t; if (f > t) [f, t] = [t, f]; return L.filter(m => m >= f && m <= t); };
@@ -1811,7 +1926,7 @@ VIEWS.gengins = { title: "Gestion engins",
   tools() { const L = GE.mois.map(x => x.mois).sort(), sel = geSel(), o = v => L.map(m => '<option value="' + m + '"' + (m === v ? " selected" : "") + ">" + esc(moisTxt(m)) + "</option>").join("");
     return '<div class="tools">' + (L.length ? field("ge-from", "Du mois", '<select id="ge-from">' + o(sel[0]) + "</select>") + field("ge-to", "Au mois", '<select id="ge-to">' + o(sel[sel.length - 1]) + "</select>") +
       '<button class="btn small" data-act="ge-cumul" style="align-self:flex-end" title="Tous les mois importés">Cumul (tous les mois)</button>' : "") +
-      '<span class="grow"></span><button class="btn" data-act="ge-list">Reportings importés (' + L.length + ")</button><button class=\"btn primary\" data-act=\"ge-add\">+ Ajouter reporting</button></div>"; },
+      '<span class="grow"></span><button class="btn" data-act="ge-pt">⏱ Saisie compteur</button><button class="btn" data-act="ge-list">Reportings importés (' + L.length + ")</button><button class=\"btn primary\" data-act=\"ge-add\">+ Ajouter reporting</button></div>"; },
   bind() { ["ge-from", "ge-to"].forEach(id => { const e = $("#" + id); if (e) e.onchange = () => { S.f.geFrom = $("#ge-from").value; S.f.geTo = $("#ge-to").value; render(); }; });
     const c = $("#ge-code"); if (c) c.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); S.f.geCode = c.value.trim().split(/\s+[–-]\s+/)[0]; render(); } }); },
   body() { if (!S.isAdmin) return '<div class="empty">Réservé aux administrateurs.</div>';
@@ -1870,8 +1985,10 @@ function gePlanning() {
     /* compteur le plus récent : reporting (fin de mois) ou compteur saisi dans Suivi huiles après le reporting */
     /* un compteur nettement plus bas saisi dans Suivi huiles = changement de compteur après le reporting */
     let cpt = r.cpt_fin, dRef = per.fin, chgH = null;
-    for (const c of [...S.hCon.values()].filter(c => c.engin === r.code && N(c.compteur) > 0 && c.date > (per.fin || "")).sort((a, b) => (a.date || "").localeCompare(b.date || "") || a.id - b.id)) {
-      const v = N(c.compteur); if (cpt !== null && v < N(cpt) && (v < N(cpt) * 0.5 || N(cpt) - v > 200)) { chgH = { date: c.date, avant: N(cpt), apres: v, src: "Suivi huiles" }; cpt = v; dRef = c.date; }
+    const lect = [...S.hCon.values()].filter(c => c.engin === r.code && N(c.compteur) > 0 && c.date > (per.fin || "")).map(c => ({ date: c.date, compteur: c.compteur, id: c.id, src: "Suivi huiles" }))
+      .concat(GE.pt.filter(t => t.code === r.code && N(t.compteur) > 0 && t.date > (per.fin || "")).map(t => ({ date: t.date, compteur: t.compteur, id: 1e9 + t.id, src: "Pointage" })));
+    for (const c of lect.sort((a, b) => (a.date || "").localeCompare(b.date || "") || a.id - b.id)) {
+      const v = N(c.compteur); if (cpt !== null && v < N(cpt) && (v < N(cpt) * 0.5 || N(cpt) - v > 200)) { chgH = { date: c.date, avant: N(cpt), apres: v, src: c.src }; cpt = v; dRef = c.date; }
       else if (cpt === null || v >= N(cpt)) { cpt = v; dRef = c.date; } }
     /* rythme = moyenne des 3 derniers mois pointés (heures ou km par jour calendaire) */
     const hist = GE.eng.filter(x => x.code === r.code).sort((a, b) => b.mois.localeCompare(a.mois)).slice(0, 3);
@@ -2259,6 +2376,7 @@ document.addEventListener("click", async e => { const b = e.target.closest("[dat
     if (a === "inv-del") { const o = S.inv.get(id); if (!S.isAdmin || !o) return; return confirmBox("Sortir l'engin " + id + " de l'inventaire (il a quitté le chantier) ? Sa fiche reste dans Engins.", async () => { await must(sb.from("inventaire").delete().eq("code", id).select("code")); S.inv.delete(id); schedule(); toast("Engin " + id + " sorti de l'inventaire."); }); }
     if (a === "inv-xls") return xls("Inventaire_" + today() + ".xlsx", "Inventaire", VIEWS.inventaire.rows().map(o => ({ "Code": o.code, "Famille": o.famille, "Gamme": o.gamme, "Catégorie": o.categorie, "Marque": o.marque, "Type": o.type, "N° série": o.serie, "Date d'entrée": fD(o.dateEntree) })));
     if (a === "ge-add") return S.isAdmin && geImportForm();
+    if (a === "ge-pt") return S.isAdmin && gePtForm();
     if (a === "ge-list") return S.isAdmin && geListForm();
     if (a === "ge-cumul") { const L = GE.mois.map(x => x.mois).sort(); S.f.geFrom = L[0]; S.f.geTo = L[L.length - 1]; return render(); }
     if (a === "ge-code") { const c = $("#ge-code"); S.f.geCode = c ? c.value.trim().split(/\s+[–-]\s+/)[0] : ""; return render(); }
