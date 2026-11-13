@@ -1865,12 +1865,16 @@ function gePlanning() {
   for (const r of last.values()) {
     if (r.date_sortie) continue; if (S.inv.size && !S.inv.has(r.code)) continue;   /* uniquement les engins de l'Inventaire (présents sur le projet) */ const per = GE.mois.find(x => x.mois === r.mois) || {}, prochVal = N(r.proch_vidange) || N(r.vidange_prog);
     /* compteur le plus récent : reporting (fin de mois) ou compteur saisi dans Suivi huiles après le reporting */
-    let cpt = r.cpt_fin, dRef = per.fin; for (const c of S.hCon.values()) if (c.engin === r.code && N(c.compteur) > 0 && c.date > (dRef || "") && N(c.compteur) >= N(cpt)) { cpt = N(c.compteur); dRef = c.date; }
+    /* un compteur nettement plus bas saisi dans Suivi huiles = changement de compteur après le reporting */
+    let cpt = r.cpt_fin, dRef = per.fin, chgH = null;
+    for (const c of [...S.hCon.values()].filter(c => c.engin === r.code && N(c.compteur) > 0 && c.date > (per.fin || "")).sort((a, b) => (a.date || "").localeCompare(b.date || "") || a.id - b.id)) {
+      const v = N(c.compteur); if (cpt !== null && v < N(cpt) && (v < N(cpt) * 0.5 || N(cpt) - v > 200)) { chgH = { date: c.date, avant: N(cpt), apres: v, src: "Suivi huiles" }; cpt = v; dRef = c.date; }
+      else if (cpt === null || v >= N(cpt)) { cpt = v; dRef = c.date; } }
     /* rythme = moyenne des 3 derniers mois pointés (heures ou km par jour calendaire) */
     const hist = GE.eng.filter(x => x.code === r.code).sort((a, b) => b.mois.localeCompare(a.mois)).slice(0, 3);
     let hs = 0, js = 0; for (const x of hist) { const pp = GE.mois.find(y => y.mois === x.mois); if (!pp) continue; hs += N(x.hm); js += Math.round((Date.parse(pp.fin) - Date.parse(pp.debut)) / 864e5) + 1; }
     let rate = js ? hs / js : 0, rateSrc = "3 derniers mois"; const km = geKm(r);
-    const chg = GE.eng.filter(x => x.code === r.code && x.cpt_changes && x.cpt_changes.length).flatMap(x => x.cpt_changes).sort((a, b) => (b.date || "").localeCompare(a.date || ""))[0];
+    const chg = chgH || GE.eng.filter(x => x.code === r.code && x.cpt_changes && x.cpt_changes.length).flatMap(x => x.cpt_changes).sort((a, b) => (b.date || "").localeCompare(a.date || ""))[0];
     /* compteur changé : rythme calculé uniquement sur le nouveau compteur (depuis le changement), dès qu'il couvre au moins 3 jours */
     if (chg && chg.date && dRef && cpt !== null) { const jN = Math.round((Date.parse(dRef) - Date.parse(chg.date)) / 864e5);
       if (jN >= 3 && N(cpt) >= N(chg.apres)) { rate = (N(cpt) - N(chg.apres)) / jN; rateSrc = "nouveau compteur, " + jN + " j"; } else rateSrc = "3 derniers mois (nouveau compteur trop récent)"; }
