@@ -1866,7 +1866,7 @@ const GE_TOL = 0.10;   /* tolérance de dépassement admise : 10 % de l'interval
 function gePlanning() {
   const out = [], last = new Map(); for (const r of GE.eng) { const o = last.get(r.code); if (!o || r.mois > o.mois) last.set(r.code, r); }
   for (const r of last.values()) {
-    if (r.date_sortie) continue; if (S.inv.size && !S.inv.has(r.code)) continue;   /* uniquement les engins de l'Inventaire (présents sur le projet) */ const per = GE.mois.find(x => x.mois === r.mois) || {}, prochVal = N(r.proch_vidange) || N(r.vidange_prog);
+    if (r.date_sortie) continue; if (S.inv.size && !S.inv.has(r.code)) continue; if (GP_SANS.some(f => gpK(f) === gpK(r.famille))) continue;   /* familles sans vidange */   /* uniquement les engins de l'Inventaire (présents sur le projet) */ const per = GE.mois.find(x => x.mois === r.mois) || {}, prochVal = N(r.proch_vidange) || N(r.vidange_prog);
     /* compteur le plus récent : reporting (fin de mois) ou compteur saisi dans Suivi huiles après le reporting */
     /* un compteur nettement plus bas saisi dans Suivi huiles = changement de compteur après le reporting */
     let cpt = r.cpt_fin, dRef = per.fin, chgH = null;
@@ -1926,9 +1926,11 @@ const gpTyp = x => { const v = S.inv.get(x.code) || {}, e = S.engins.get(x.code)
 const gpEtat = x => x.ret ? "En retard – à rattraper" : (x.k > 1 ? "Prévue (" + x.k + "e vidange)" : "Prévue");
 /* répartition des vidanges par atelier (planning journalier et hebdomadaire) : par famille d'engins, modifiable engin par engin (params.ge_atelier) */
 const GP_AT = { FIXE: "Atelier fixe", MOBILE: "Atelier mobile", ST: "Par sous-traitant", NA: "Non affecté" };
-const GP_FAM = { FIXE: ["PETIT DUMPER", "MINI CHARGEUSE", "CHARGEUSE", "TRACTOPELLE", "NIVELEUSE", "BUS", "MINI BUS", "PICK UP", "AMBULANCE", "CAMION SERVITUDE", "CAMION AMPLIROLL", "CAMION CITERNE A GASOIL", "CAMION D'ENTRETIEN", "CAMION CITERNE A EAU", "CAMION BENNE", "CAMION MALAXEUR", "ELEVATEUR CHARIOT TELESCOPIQUE", "CHARIOT ELEVATEUR FRONTAL", "CAMION POMPE A BETON", "GROUPE ELECTROGENE"],
-  MOBILE: ["COMPRESSEUR THERMIQUE", "MINI PELLE", "BULLDOZER", "TOUR D'ECLAIRAGE", "GRUE MOBILE SUR PNEUS", "GRUE MOBILE SUR CHENILLE", "NACELLE ARTICULE DIESEL", "NACELLE CISEAUX DIESEL", "COMPACTEUR A BILLE", "GERATOIR", "POMPE A BETON STATIONNAIRE"],
+const GP_FAM = { FIXE: ["PETIT DUMPER", "MINI CHARGEUSE", "CHARGEUSE", "TRACTOPELLE", "NIVELEUSE", "BUS", "MINI BUS", "PICK UP", "AMBULANCE", "CAMION SERVITUDE", "CAMION AMPLIROLL", "CAMION CITERNE A GASOIL", "CAMION D'ENTRETIEN", "CAMION CITERNE A EAU", "CAMION BENNE", "CAMION MALAXEUR", "ELEVATEUR CHARIOT TELESCOPIQUE", "CHARIOT ELEVATEUR FRONTAL", "CAMION POMPE A BETON"],
+  MOBILE: ["COMPRESSEUR THERMIQUE", "MINI PELLE", "BULLDOZER", "TOUR D'ECLAIRAGE", "GRUE MOBILE SUR PNEUS", "GRUE MOBILE SUR CHENILLE", "NACELLE ARTICULE DIESEL", "NACELLE CISEAUX DIESEL", "COMPACTEUR A BILLE", "GERATOIR", "POMPE A BETON STATIONNAIRE", "GROUPE ELECTROGENE", "PELLE HYDRAULIQUE"],
   ST: ["PELLE SUR CHENILLE", "PELLE SUR PNEU"] };
+/* familles sans vidange : jamais dans le planning des vidanges */
+const GP_SANS = ["BALAYEUSE", "BRISE ROCHE HYDRAULIQUE", "CENTRALE A BETON", "GROUPE DE REFROIDISSEMENT", "GRUE A TOUR"];
 const gpK = f => nh(f || "").replace(/[^a-z0-9]/g, "");
 const GP_FAMK = new Map(Object.entries(GP_FAM).flatMap(([a, L]) => L.map(f => [gpK(f), a])));
 const gpAtFam = x => GP_FAMK.get(gpK(x.fam)) || GP_FAMK.get(gpK((S.inv.get(x.code) || {}).famille)) || "NA";
@@ -1957,8 +1959,7 @@ VIEWS.gplan = { title: "Planning vidanges",
       const days = []; for (let d = per.d1; d <= per.d2; d = addJ(d, 1)) days.push(d); const ret = L.filter(x => x.ret), parJ = days.map(d => [d, L.filter(x => !x.ret && x.dPrev === d)]).filter(([, l]) => l.length);
       return '<div class="panel"><h3>' + ttl + " <small>" + L.length + " vidange(s)" + (ret.length ? " · " + ret.length + " en retard" : "") + "</small></h3>" + (ret.length ? '<h4 class="reste">En retard – à rattraper (' + ret.length + ")</h4>" + table(cols, ret, { limit: 500 }) : "") +
         (parJ.length ? parJ.map(([d, l]) => "<h4>" + esc(new Date(Date.parse(d)).toLocaleDateString("fr-FR", { weekday: "long", timeZone: "UTC" })) + " " + fD(d) + ' <small class="muted">' + l.length + " vidange(s)</small></h4>" + table(cols, l, { limit: 500 })).join("") : (ret.length ? "" : '<div class="empty">Aucune vidange prévue sur la période.</div>')) + "</div>"; };
-    if (per.t === "mois") h += bloc(L, "Vidanges du mois");
-    else { h += '<div class="kpis">' + Object.entries(GP_AT).map(([k, t]) => { const n = L.filter(x => gpAt(x) === k).length; return k === "NA" && !n ? "" : kpi(t, nb(n), k === "NA" ? "warn" : "txt"); }).join("") + "</div>";
+    { h += '<div class="kpis">' + Object.entries(GP_AT).map(([k, t]) => { const n = L.filter(x => gpAt(x) === k).length; return k === "NA" && !n ? "" : kpi(t, nb(n), k === "NA" ? "warn" : "txt"); }).join("") + "</div>";
       for (const k of Object.keys(GP_AT)) { const l = L.filter(x => gpAt(x) === k); if (k === "NA" && !l.length) continue; h += bloc(l, "🔧 " + GP_AT[k]); } }
     h += '<div class="panel"><h3>Planning complet des engins</h3>' + gePlanningHtml(P) + "</div>";
     return h + '<p class="hint">Date prévue calculée à partir du compteur actuel, de la prochaine vidange et du rythme d\'utilisation de chaque engin (voir explication sous le planning complet). Sur une semaine ou un mois, un engin très utilisé peut avoir plusieurs vidanges (tous les « intervalle ÷ rythme » jours). Les engins en retard figurent dans « à rattraper ».</p>'; } };
@@ -2005,8 +2006,9 @@ async function gpPdfMois(per, L, nom) {
   const NAVY = [31, 56, 100], BLUE = [47, 84, 150], LBLUE = [217, 225, 242], YEL = [255, 252, 235], GREY = [217, 217, 217], LGREY = [236, 236, 236], RED = [255, 199, 206], ORA = [255, 229, 153];
   const MOIS = moisTxt(per.d1.slice(0, 7)).toUpperCase(), chantier = S.params.nom_chantier || "";
   const bar = (txt, y, h, fs) => { doc.setFillColor(...NAVY); doc.rect(M, y, W - 2 * M, h, "F"); doc.setTextColor(255); doc.setFont("helvetica", "bold"); doc.setFontSize(fs); doc.text(sp(txt), W / 2, y + h / 2 + fs * 0.13, { align: "center" }); };
+  const draw = (L, lab, first) => {
   /* ===== page 1 : calendrier ===== */
-  bar("CALENDRIER DES VIDANGES – " + MOIS, M, 12, 17);
+  if (!first) doc.addPage("a3", "landscape"); bar("CALENDRIER DES VIDANGES – " + MOIS + (lab ? " – " + lab : ""), M, 12, 17);
   const cw = (W - 2 * M) / 7; let y = M + 17;
   doc.setDrawColor(143, 170, 220); doc.setLineWidth(0.25);
   JOURS_L.forEach((j, i) => { doc.setFillColor(...BLUE); doc.rect(M + i * cw, y, cw, 8, "FD"); doc.setTextColor(255); doc.setFontSize(11); doc.setFont("helvetica", "bold"); doc.text(j, M + i * cw + cw / 2, y + 5.5, { align: "center" }); });
@@ -2029,7 +2031,7 @@ async function gpPdfMois(per, L, nom) {
       let yy = y + 10.5; for (const x of parJ[d] || []) { const t = doc.splitTextToSize(sp("• " + x.code + " – " + titreCase(x.fam || gpCat(x)) + (x.ret ? " (RETARD)" : "")), cw - 1.5); if (x.ret) doc.setTextColor(180, 35, 24); doc.text(t, x0 + 0.8, yy); doc.setTextColor(30); yy += t.length * lh * (rowsH[wi] < 16 ? 0.85 : 1); } }
     y += 7 + rowsH[wi]; });
   /* ===== page 2 : planning détaillé ===== */
-  doc.addPage("a3", "landscape"); bar("PLANNING MENSUEL DES VIDANGES – " + MOIS, M, 11, 15);
+  doc.addPage("a3", "landscape"); bar("PLANNING MENSUEL DES VIDANGES – " + MOIS + (lab ? " – " + lab : ""), M, 11, 15);
   doc.setFillColor(...LBLUE); doc.rect(M, M + 11, W - 2 * M, 6, "F"); doc.setTextColor(40); doc.setFont("helvetica", "italic"); doc.setFontSize(9); doc.text(sp("Chantier : " + chantier), W / 2, M + 15.2, { align: "center" });
   const sem = []; for (const x of L) { const lu = lundiDe(x.dPrev); let s = sem.find(o => o.lu === lu); if (!s) sem.push(s = { lu, L: [] }); s.L.push(x); } sem.sort((a, b) => a.lu.localeCompare(b.lu));
   const clip = lu => { const a = lu < per.d1 ? per.d1 : lu, b = addJ(lu, 6) > per.d2 ? per.d2 : addJ(lu, 6); return [a, b]; }, dm = d => d.slice(8, 10) + "/" + d.slice(5, 7);
@@ -2038,8 +2040,8 @@ async function gpPdfMois(per, L, nom) {
   for (const s of sem) { const [a, b] = clip(s.lu); doc.setDrawColor(191, 144, 0); doc.setFillColor(255, 230, 153); doc.rect(bx, by, bw, 7, "FD"); doc.setFillColor(255, 242, 204); doc.rect(bx, by + 7, bw, 9, "FD");
     doc.setTextColor(60); doc.setFont("helvetica", "bold"); doc.setFontSize(7.5); doc.text(sp("Semaine " + isoWeek(s.lu) + " (" + a.slice(8, 10) + "–" + dm(b) + ")"), bx + bw / 2, by + 4.6, { align: "center" });
     doc.setFontSize(14); doc.setTextColor(...NAVY); doc.text(String(s.L.length), bx + bw / 2, by + 13.5, { align: "center" }); bx += bw; }
-  doc.setDrawColor(143, 170, 220); doc.setFillColor(...LBLUE); doc.rect(W - M - 110, by, 70, 8, "FD"); doc.rect(W - M - 110, by + 8, 70, 8, "FD");
-  doc.setTextColor(...NAVY); doc.setFontSize(13); doc.text("TOTAL " + MOIS.split(" ")[0], W - M - 75, by + 5.7, { align: "center" }); doc.setFontSize(15); doc.text(String(L.length), W - M - 75, by + 14, { align: "center" });
+  doc.setDrawColor(143, 170, 220); doc.setFillColor(...LBLUE); doc.rect(W - M - 110, by, 100, 8, "FD"); doc.rect(W - M - 110, by + 8, 100, 8, "FD");
+  doc.setTextColor(...NAVY); doc.setFontSize(11.5); doc.text(sp("TOTAL " + MOIS.split(" ")[0] + (lab ? " – " + lab : "")), W - M - 60, by + 5.7, { align: "center" }); doc.setFontSize(15); doc.text(String(L.length), W - M - 60, by + 14, { align: "center" });
   const head = [["N°", "Jour", "Date prévue", "Code", "Désignation", "Famille", "Marque / Type", "Unité", "Compteur actuel", "Prochaine vidange", "Cycle vidange", "Reste", "Moy. / jour", "Priorité", "Date réalisée", "Compteur réalisé", "Visa / Observations"]];
   const body = [], meta = []; let n = 0;
   for (const s of sem) { const [a, b] = clip(s.lu), jA = JOURS_L[(new Date(Date.parse(a)).getUTCDay() + 6) % 7].toLowerCase(), jB = JOURS_L[(new Date(Date.parse(b)).getUTCDay() + 6) % 7].toLowerCase();
@@ -2058,6 +2060,9 @@ async function gpPdfMois(per, L, nom) {
       if (d.column.index >= 14) d.cell.styles.fillColor = YEL;
       if (m === "urg") { if (d.column.index < 14) d.cell.styles.fillColor = RED; if (d.column.index < 14) { d.cell.styles.textColor = [156, 0, 6]; d.cell.styles.fontStyle = "bold"; } }
       else if (m === "prio" && d.column.index === 13) { d.cell.styles.fillColor = ORA; d.cell.styles.textColor = [127, 96, 0]; d.cell.styles.fontStyle = "bold"; } } });
+  };
+  const AK = Object.keys(GP_AT), grp = AK.map(k => [k, L.filter(x => gpAt(x) === k)]).filter(([k, l]) => l.length || k !== "NA");
+  grp.forEach(([k, l], gi) => draw(l, GP_AT[k].toUpperCase(), gi === 0));
   const np = doc.getNumberOfPages(); for (let i = 1; i <= np; i++) { doc.setPage(i); doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(110); doc.text("SGTM – Service Matériel", M, H - 6); doc.text(sp("Édité le " + fD(auj)), W / 2, H - 6, { align: "center" }); doc.text("Page " + i + " / " + np, W - M, H - 6, { align: "right" }); }
   doc.save(nom + ".pdf"); }
 const GE_PL = { retard: ["En retard", "p-crit"], j7: ["Dans les 7 jours", "p-warn"], j30: ["Dans le mois", "p-acc"], plus: ["Plus tard", "p-ok"], arret: ["Engin à l'arrêt", "p-info"], inconnu: ["Données manquantes", "p-info"] };
