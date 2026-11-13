@@ -1797,14 +1797,14 @@ async function gePtCanevas(d1, nj) {
   await loadScript("vendor/exceljs.min.js"); const wb = new ExcelJS.Workbook(); wb.creator = APPNAME;
   const ws = wb.addWorksheet("POINTAGE", { pageSetup: { paperSize: 8, orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0, printTitlesRow: "5:6" } });
   const thin = { style: "thin", color: { argb: "FF8FAADC" } }, bd = { top: thin, left: thin, bottom: thin, right: thin }, fill = c => ({ type: "pattern", pattern: "solid", fgColor: { argb: c } });
-  const FIX = 6, last = FIX + nj * 2;
-  ws.columns = [10, 28, 28, 7, 13, 12].concat(Array(nj * 2).fill(0).map((_, i) => i % 2 ? 7 : 11)).map(w => ({ width: w }));
+  const FIX = 2, last = FIX + nj * 2;
+  ws.columns = [12, 32].concat(Array(nj * 2).fill(0).map((_, i) => i % 2 ? 7 : 11)).map(w => ({ width: w }));
   ws.mergeCells(1, 1, 1, last); const t = ws.getCell(1, 1); t.value = "CANEVAS DE POINTAGE DES COMPTEURS ENGINS"; t.font = { bold: true, size: 15, color: { argb: "FFFFFFFF" } }; t.fill = fill("FF1F3864"); t.alignment = { horizontal: "center", vertical: "middle" }; ws.getRow(1).height = 26;
   ws.getCell(2, 1).value = "Chantier :"; ws.getCell(2, 2).value = S.params.nom_chantier || ""; ws.getCell(2, 3).value = "Mois : " + (d1 ? moisTxt(d1.slice(0, 7)) : "");
-  ws.getCell(2, 4).value = "Pointé par :"; ws.mergeCells(2, 5, 2, 6); ws.getCell(2, 5).border = { bottom: thin }; [1, 3, 4].forEach(c => ws.getCell(2, c).font = { bold: true });
-  ws.mergeCells(3, 1, 3, last); const n = ws.getCell(3, 1); n.value = "Saisir la DATE en tête de chaque jour (cases jaunes), puis pour chaque engin le COMPTEUR (heures ou km, voir Unité) et l'ÉTAT : M = Marche · AF = Arrêt facturé · ANF = Arrêt non facturé · P = Panne · TR = Transfert / hors chantier. Ne pas modifier les colonnes Code.";
+  if (last >= 6) { ws.getCell(2, 5).value = "Pointé par :"; ws.getCell(2, 5).font = { bold: true }; ws.mergeCells(2, 6, 2, Math.min(last, 8)); ws.getCell(2, 6).border = { bottom: thin }; } [1, 3].forEach(c => ws.getCell(2, c).font = { bold: true });
+  ws.mergeCells(3, 1, 3, last); const n = ws.getCell(3, 1); n.value = "Saisir la DATE en tête de chaque jour (cases jaunes), puis pour chaque engin le COMPTEUR (heures ou km, voir Unité) et l'ÉTAT : M = Marche · AF = Arrêt facturé · ANF = Arrêt non facturé · P = Panne · TR = Transfert / hors chantier. Unité : heures, ou km pour les véhicules. Ne pas modifier les colonnes Code.";
   n.font = { italic: true, size: 9, color: { argb: "FF555555" } }; n.alignment = { wrapText: true, vertical: "middle" }; ws.getRow(3).height = 26;
-  const H = ["Code", "Engin", "Famille_Engin", "Unité", "Dernier compteur connu", "Date dernier compteur"];
+  const H = ["Code", "Famille_Engin"];
   H.forEach((h, i) => { ws.mergeCells(5, i + 1, 6, i + 1); const c = ws.getCell(5, i + 1); c.value = h; });
   for (let k = 0; k < nj; k++) { const c0 = FIX + 1 + k * 2; ws.mergeCells(5, c0, 5, c0 + 1); const c = ws.getCell(5, c0); c.value = d1 ? new Date(Date.parse(addJ(d1, k))) : null; c.numFmt = "dd/mm/yyyy";
     c.dataValidation = { type: "date", operator: "greaterThan", allowBlank: true, formulae: [new Date(Date.UTC(2020, 0, 1))], showErrorMessage: true, error: "Saisir une date (jj/mm/aaaa)." };
@@ -1812,12 +1812,14 @@ async function gePtCanevas(d1, nj) {
   for (const r of [5, 6]) for (let c = 1; c <= last; c++) { const x = ws.getCell(r, c); x.font = { bold: true, color: { argb: c > FIX && r === 5 ? "FF1F3864" : "FFFFFFFF" } }; x.fill = fill(c > FIX && r === 5 ? "FFFFF2CC" : "FF2F5496"); x.border = bd; x.alignment = { horizontal: "center", vertical: "middle", wrapText: true }; }
   ws.getRow(5).height = 22; ws.getRow(6).height = 18;
   const fam = x => (S.inv.get(x) || {}).famille || ((GE.eng.find(r => r.code === x)) || {}).famille || "";
-  const codes = [...S.inv.keys()].sort((a, b) => fam(a).localeCompare(fam(b)) || a.localeCompare(b));
-  codes.forEach((code, i) => { const v = S.inv.get(code) || {}, lc = geLastCpt(code), row = ws.addRow([code, v.gamme || "", fam(code), geUnite(code), lc ? lc.c : null, lc ? new Date(Date.parse(lc.d)) : null]);
-    row.eachCell({ includeEmpty: true }, (c, ci) => { if (ci > last) return; c.border = bd; c.alignment = { vertical: "middle", horizontal: ci <= 1 || ci === 4 || ci > FIX ? "center" : ci === 5 ? "right" : "left" };
+  /* ordre des engins : celui du dernier reporting importé (ordre du fichier), puis les engins absents du reporting par famille */
+  const ordre = new Map(); GE.eng.slice().sort((a, b) => b.mois.localeCompare(a.mois) || a.id - b.id).forEach(r => { if (!ordre.has(r.code)) ordre.set(r.code, (r.mois === (GE.eng.reduce((m, x) => x.mois > m ? x.mois : m, "")) ? 0 : 1e6) + ordre.size); });
+  const codes = [...S.inv.keys()].sort((a, b) => (ordre.has(a) ? ordre.get(a) : 2e6) - (ordre.has(b) ? ordre.get(b) : 2e6) || fam(a).localeCompare(fam(b)) || a.localeCompare(b));
+  codes.forEach((code, i) => { const row = ws.addRow([code, fam(code)]);
+    row.eachCell({ includeEmpty: true }, (c, ci) => { if (ci > last) return; c.border = bd; c.alignment = { vertical: "middle", horizontal: ci === 1 ? "center" : "left" };
       if (ci <= FIX) c.fill = fill(i % 2 ? "FFF2F5FA" : "FFFFFFFF"); });
     for (let c = last; c > FIX; c--) { const x = row.getCell(c); x.border = bd; }
-    row.getCell(1).font = { bold: true }; row.getCell(5).numFmt = "# ##0"; row.getCell(6).numFmt = "dd/mm/yyyy"; row.getCell(5).font = row.getCell(6).font = { color: { argb: "FF777777" }, size: 9 }; });
+    row.getCell(1).font = { bold: true }; });
   const r1 = 7, r2 = 6 + codes.length;
   for (let k = 0; k < nj; k++) { const cc = FIX + 1 + k * 2, L = c => ws.getColumn(c).letter;
     ws.dataValidations.add(L(cc) + r1 + ":" + L(cc) + r2, { type: "decimal", operator: "greaterThanOrEqual", allowBlank: true, formulae: [0], showErrorMessage: true, error: "Compteur : nombre positif (heures ou km)." });
@@ -1827,7 +1829,7 @@ async function gePtCanevas(d1, nj) {
   ["CANEVAS DE POINTAGE – MODE D'EMPLOI", "", "1. Écrire la date de chaque jour pointé dans les cases jaunes (une colonne Compteur + État par jour, jusqu'à " + nj + " jours par fichier).", "2. Pour chaque engin, saisir le compteur lu (heures ou km, voir la colonne Unité) et l'état du jour.",
     "3. Laisser vide un engin non pointé. Ne pas supprimer ni modifier les colonnes Code.", "4. Importer le fichier dans le site : Gestion engins › ⏱ Saisie compteur › Pointage Excel. Les dates sont lues automatiquement.",
     "5. Réimporter un même jour remplace les compteurs déjà saisis pour ce jour.", "", "États :", "M = Marche", "AF = Arrêt facturé", "ANF = Arrêt non facturé", "P = Panne", "TR = Transfert / hors chantier", "",
-    "« Dernier compteur connu » : dernier compteur enregistré dans le site à la date d'export (aide à repérer une erreur de saisie)."].forEach((x, i) => { const r = h.addRow([x]); if (i === 0) r.font = { bold: true, size: 13 }; if (x === "États :") r.font = { bold: true }; });
+    "Les engins sont classés dans le même ordre que le dernier reporting importé."].forEach((x, i) => { const r = h.addRow([x]); if (i === 0) r.font = { bold: true, size: 13 }; if (x === "États :") r.font = { bold: true }; });
   saveBlob(new Blob([await wb.xlsx.writeBuffer()], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), "Canevas_pointage_compteurs" + (d1 ? "_" + d1 : "") + ".xlsx"); }
 /* lecture d'un canevas de pointage (le nôtre ou l'ancien CANVA POINTAGE) */
 function gePtParse(aoa, dDef) {
