@@ -1687,6 +1687,15 @@ const xlDate = v => { if (v === null || v === undefined || v === "") return null
   const s = String(v).trim(), m = s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/); if (m) return m[3] + "-" + m[2].padStart(2, "0") + "-" + m[1].padStart(2, "0"); return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : null; };
 const xlNum = v => { if (v === null || v === undefined || v === "") return null; const n = typeof v === "number" ? v : +String(v).replace(/\s/g, "").replace(",", "."); return Number.isFinite(n) ? n : null; };
 const xlCpt = v => { const n = xlNum(v); if (n !== null) return n; const m = String(v ?? "").replace(/\s/g, "").match(/\d+(?:[.,]\d+)?/); return m ? +m[0].replace(",", ".") : null; };   /* « 9570h » → 9570 */
+/* relevés de compteur du mois : retire les erreurs de saisie isolées (ex. un code engin tapé à la place du compteur)
+   et repère les changements de compteur (le relevé repart d'une valeur basse) */
+function geCounter(etats) {
+  const pts = etats.map(x => ({ d: x.d, c: x.c !== null && x.c > 0 ? x.c : null })).filter(x => x.c !== null);
+  const ok = pts.filter((x, i) => { const a = pts[i - 1], b = pts[i + 1]; if (!a || !b) return true; return !(b.c >= a.c && (x.c > b.c || x.c < a.c)); });
+  let hm = 0; const changes = [];
+  for (let i = 1; i < ok.length; i++) { const dlt = ok[i].c - ok[i - 1].c;
+    if (dlt >= 0) hm += dlt; else if (ok[i].c < ok[i - 1].c * 0.5 || ok[i - 1].c - ok[i].c > 200) changes.push({ date: ok[i].d, avant: ok[i - 1].c, apres: ok[i].c }); }
+  return { vals: ok.map(x => x.c), hm, changes, ecartes: pts.length - ok.length }; }
 function geParse(wb) {
   const sh = name => { const k = wb.SheetNames.find(n => nh(n) === nh(name)) || wb.SheetNames.find(n => nh(n).includes(nh(name))); return k ? XLSX.utils.sheet_to_json(wb.Sheets[k], { header: 1, raw: true, defval: null }) : null; };
   const R = sh("Reporting"); if (!R) throw new Error("Feuille « Reporting » introuvable dans ce fichier.");
@@ -1712,13 +1721,14 @@ function geBuild(P, mois) {
   const debut = dates[0], fin = dates[dates.length - 1], eng = [], seen = new Set(), C = P.C, g = (r, i) => i >= 0 ? r[i] : null, str = v => v === null || v === undefined ? null : String(v).trim() || null;
   for (let i = P.hi + 1; i < P.R.length; i++) { const r = P.R[i]; if (!r) continue; const code = str(g(r, C.code)); if (!code || !/^\d{3,7}$/.test(code) || seen.has(code)) continue; seen.add(code);
     const etats = P.pairs.map((p, k) => { const e = str(r[p.e]); return { d: dates[k], e: e ? e.toUpperCase() : "", c: xlNum(r[p.c]) }; });
-    const n = s => etats.filter(x => x.e === s).length, cpts = etats.map(x => x.c).filter(v => v !== null && v > 0);
-    const hmF = xlNum(g(r, C.hm)), hmC = cpts.length ? Math.max(...cpts) - Math.min(...cpts) : 0, hmV = hmF !== null && hmF >= 0 ? hmF : hmC, uf = str(g(r, C.unite)) || "";
+    const n = s => etats.filter(x => x.e === s).length, K = geCounter(etats), cpts = K.vals;
+    /* heures du mois : si le compteur a été changé, somme des heures avant et après le changement (le « HM CUM » du fichier serait faux) */
+    const hmF = xlNum(g(r, C.hm)), hmV = K.changes.length ? K.hm : (hmF !== null && hmF >= 0 ? hmF : K.hm), uf = str(g(r, C.unite)) || "";
     /* compteur en km (véhicules) : indiqué dans H/KM, sinon déduit (plus de 744 « heures » dans un mois = des km) */
     const unite = /km/i.test(uf) ? "km" : (/^h/i.test(uf) ? "h" : (hmV > 744 ? "km" : "h"));
     eng.push({ mois: mois + "-01", code, designation: str(g(r, C.des)), famille: str(g(r, C.fam)) || str(g(r, C.des)) || "Autre", categorie: str(g(r, C.cat)), marque: str(g(r, C.mar)), type: str(g(r, C.typ)), serie: str(g(r, C.ser)),
       date_entree: xlDate(g(r, C.din)), date_sortie: xlDate(g(r, C.dout)), j_panne: n("P"), j_af: n("AF"), j_anf: n("ANF"), j_m: n("M"), j_tr: n("TR"), j_factures: xlNum(g(r, C.jf)) ?? (n("M") + n("AF")),
-      hm: hmV, unite, cpt_debut: cpts.length ? Math.min(...cpts) : null, cpt_fin: cpts.length ? Math.max(...cpts) : null,
+      hm: hmV, unite, cpt_debut: cpts.length ? cpts[0] : null, cpt_fin: cpts.length ? cpts[cpts.length - 1] : null, cpt_changes: K.changes.length ? K.changes : null,
       proch_vidange: xlCpt(g(r, C.proch)), vidange_prog: xlCpt(g(r, C.prog)), der_vidange: xlCpt(g(r, C.der)), date_vidange: xlDate(g(r, C.dvid)), etats: etats.map(x => [x.e, x.c]) }); }
   const pan = []; if (P.decl) { const hi = P.decl.findIndex(r => r && r.some(c => nh(c).startsWith("codeengin")));
     if (hi >= 0) { const H = P.decl[hi].map(nh), ix = k => H.findIndex(h => h.startsWith(k));
@@ -1860,7 +1870,8 @@ function gePlanning() {
     const hist = GE.eng.filter(x => x.code === r.code).sort((a, b) => b.mois.localeCompare(a.mois)).slice(0, 3);
     let hs = 0, js = 0; for (const x of hist) { const pp = GE.mois.find(y => y.mois === x.mois); if (!pp) continue; hs += N(x.hm); js += Math.round((Date.parse(pp.fin) - Date.parse(pp.debut)) / 864e5) + 1; }
     const rate = js ? hs / js : 0, km = geKm(r);
-    const o = { code: r.code, des: r.designation, fam: r.famille, km, cpt: cpt === null ? null : N(cpt), dRef, proch: prochVal || null, der: N(r.der_vidange) || null, dDer: r.date_vidange, rate, mois: r.mois };
+    const chg = GE.eng.filter(x => x.code === r.code && x.cpt_changes && x.cpt_changes.length).flatMap(x => x.cpt_changes).sort((a, b) => (b.date || "").localeCompare(a.date || ""))[0];
+    const o = { chg, code: r.code, des: r.designation, fam: r.famille, km, cpt: cpt === null ? null : N(cpt), dRef, proch: prochVal || null, der: N(r.der_vidange) || null, dDer: r.date_vidange, rate, mois: r.mois };
     /* vidange saisie dans Suivi huiles après le reporting : elle remet le compteur à zéro → nouvelle prochaine vidange = compteur de cette vidange + intervalle */
     const interval = N(r.proch_vidange) && N(r.der_vidange) && N(r.proch_vidange) > N(r.der_vidange) ? N(r.proch_vidange) - N(r.der_vidange) : null;
     const vh = [...S.hCon.values()].filter(c => c.engin === r.code && c.entretien === "Vidange" && c.date > (per.fin || "")).sort((a, b) => (b.date || "").localeCompare(a.date || ""))[0];
@@ -1881,14 +1892,14 @@ function gePlanningHtml(P) {
   const cnt = k => P.filter(o => o.etat === k).length;
   return '<div class="chips" style="margin-bottom:8px">' + Object.entries(GE_PL).map(([k, [t, c]]) => '<button type="button" class="btn small' + (f === k ? " primary" : "") + '" data-act="ge-pl-f" data-id="' + (f === k ? "" : k) + '"><span class="pill ' + c + '">' + nb(cnt(k)) + "</span> " + t + "</button>").join("") + "</div>" +
     table([{ h: "Code", f: o => '<a href="#" data-act="ge-code-go" data-id="' + esc(o.code) + '">' + mono(o.code) + "</a>" }, { h: "Engin", f: o => esc(o.des) }, { h: "Famille", f: o => '<span class="muted">' + esc(o.fam) + "</span>" },
-      { h: "Compteur actuel", n: 1, f: o => o.cpt === null ? "–" : nb(o.cpt) + (o.km ? " km" : " h") + '<br><span class="muted" style="font-size:11px">au ' + fD(o.dRef) + "</span>" },
+      { h: "Compteur actuel", n: 1, f: o => o.cpt === null ? "–" : nb(o.cpt) + (o.km ? " km" : " h") + '<br><span class="muted" style="font-size:11px">au ' + fD(o.dRef) + "</span>" + (o.chg ? '<br><span class="pill p-warn" title="Ancien compteur ' + esc(nb(o.chg.avant)) + " → nouveau " + esc(nb(o.chg.apres)) + '">⟲ compteur changé le ' + fD(o.chg.date) + "</span>" : "") },
       { h: "Prochaine vidange", n: 1, f: o => o.proch ? nb(o.proch) : '<span class="muted">–</span>' }, { h: "Reste", n: 1, f: o => o.reste === undefined ? "–" : (o.reste <= 0 ? '<b class="reste">dépassée de ' + nb(-o.reste) + "</b>" : nb(o.reste)) },
       { h: "Rythme", n: 1, f: o => o.rate ? nb(Math.round(o.rate * 10) / 10) + (o.km ? " km" : " h") + "/j" : '<span class="muted">0</span>' },
       { h: "Date prévue", f: o => o.date ? "<b>" + fD(o.date) + "</b>" + (o.jAuj !== null ? '<br><span class="muted" style="font-size:11px">' + (o.jAuj < 0 ? "il y a " + -o.jAuj + " j" : "dans " + o.jAuj + " j") + "</span>" : "") : '<span class="muted">–</span>' },
       { h: "État", f: o => { const [t, c] = GE_PL[o.etat]; return '<span class="pill ' + c + '">' + t + "</span>"; } },
       { h: "Dernière vidange", f: o => o.dDer ? fD(o.dDer) + '<br><span class="muted" style="font-size:11px">' + (o.der ? "à " + nb(o.der) + " · " : "") + esc(o.src || "") + "</span>" : '<span class="muted">' + esc(o.note || "–") + "</span>" },
       { h: "", f: o => '<button type="button" class="btn small" data-act="ge-gamme" data-id="' + esc(o.code) + '" title="Filtres à préparer">Gamme</button>' }], L, { empty: "Aucun engin dans cette catégorie.", limit: 400 }) +
-    '<p class="hint">Date prévue = date du dernier compteur + (prochaine vidange − compteur) ÷ rythme moyen des 3 derniers mois pointés. Compteur actuel = fin du dernier reporting, ou compteur plus récent saisi dans Suivi huiles. Une vidange saisie dans Suivi huiles après le dernier reporting remplace la « dernière vidange » : prochaine vidange = son compteur + l\'intervalle de l\'engin (prochaine − dernière vidange du reporting). « Données manquantes » = pas de compteur de prochaine vidange dans le reporting. Seuls les engins présents dans l\'Inventaire (actuellement sur le projet) sont listés.</p>'; }
+    '<p class="hint">Date prévue = date du dernier compteur + (prochaine vidange − compteur) ÷ rythme moyen des 3 derniers mois pointés. Compteur actuel = fin du dernier reporting, ou compteur plus récent saisi dans Suivi huiles. Une vidange saisie dans Suivi huiles après le dernier reporting remplace la « dernière vidange » : prochaine vidange = son compteur + l\'intervalle de l\'engin (prochaine − dernière vidange du reporting). « Données manquantes » = pas de compteur de prochaine vidange dans le reporting. Seuls les engins présents dans l\'Inventaire (actuellement sur le projet) sont listés. ⟲ = compteur changé : le planning utilise le nouveau compteur (dernier relevé du mois, et non le plus grand) et la « prochaine vidange » du reporting, qui doit être exprimée sur ce nouveau compteur.</p>'; }
 /* ---------- B. réalisation du préventif ----------
    due : le compteur de l'engin a atteint la « prochaine vidange » connue au mois précédent ;
    à temps : une vidange enregistrée dans le mois au plus tard à prochaine vidange + 10 % de l'intervalle */
@@ -1968,6 +1979,8 @@ function geFiche(code, ml) {
   { const pl = gePlanning().find(o => o.code === code), hh = geHuileH(ml, GE.eng.filter(x => ml.includes(x.mois))).L.find(o => o.code === code);
     if (pl && pl.etat !== "inconnu") { const [t, c] = GE_PL[pl.etat]; h += '<div class="banner ' + (pl.etat === "retard" ? "crit" : pl.etat === "j7" ? "crit" : "info") + '">🛢 Prochaine vidange : <span class="pill ' + c + '">' + t + "</span> " + (pl.date ? "prévue le <b>" + fD(pl.date) + "</b>" : "") + " (compteur " + nb(pl.cpt) + " au " + fD(pl.dRef) + ", rythme " + nb(Math.round(pl.rate * 10) / 10) + (pl.km ? " km" : " h") + '/j) · <a href="#" data-act="ge-gamme" data-id="' + esc(code) + '">voir la gamme</a></div>'; }
     if (hh && hh.r !== null) h += '<div class="banner ' + (hh.ecart > 2 ? "crit" : "info") + '">Huile : <b>' + nb(Math.round(hh.r * 10) / 10) + " L / 100 h</b> de marche sur la période" + (hh.ecart ? " (× " + nb(Math.round(hh.ecart * 10) / 10) + " la médiane de la famille" + (hh.ecart > 2 ? " – à contrôler" : "") + ")" : "") + "</div>"; }
+  { const ch = all.filter(r => r.cpt_changes && r.cpt_changes.length).flatMap(r => r.cpt_changes);
+    if (ch.length) h += '<div class="banner info">⟲ Changement de compteur : ' + ch.map(c => "le <b>" + fD(c.date) + "</b> (ancien " + nb(c.avant) + " → nouveau " + nb(c.apres) + ")").join(" ; ") + ". Les heures du mois additionnent l'ancien et le nouveau compteur ; le suivi de vidange repart sur le nouveau compteur.</div>"; }
   /* calendrier des états jour par jour */
   h += "<h4>Pointage jour par jour</h4>" + geLegend() + R.map(r => { const per = GE.mois.find(x => x.mois === r.mois) || {}; let d = per.debut ? new Date(per.debut + "T00:00:00Z") : null;
     return '<div class="gcal"><span class="gcal-m">' + esc(moisTxt(r.mois)) + "</span>" + (r.etats || []).map(([s, c]) => { const ds = d ? d.toISOString().slice(0, 10) : ""; if (d) d = new Date(d.getTime() + 864e5); const k = s === "p" ? "P" : s;
