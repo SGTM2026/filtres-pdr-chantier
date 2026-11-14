@@ -35,12 +35,14 @@ document.title = APPNAME; $("#login-title").textContent = $("#app-title").textCo
 /* ---------- catégories ---------- */
 const CATS = {
   FILTRE: { label: "Filtres", one: "filtre", many: "filtres", type: "Type de filtre", ref: "Référence filtre" },
-  PDR: { label: "PDR", one: "pièce", many: "pièces (PDR)", type: "Désignation de la pièce", ref: "Référence pièce" }
+  PDR: { label: "PDR", one: "pièce", many: "pièces (PDR)", type: "Désignation de la pièce", ref: "Référence pièce" },
+  CONSOMMABLE: { label: "Consommables", one: "consommable", many: "consommables", type: "Désignation du consommable", ref: "Référence" }
 };
-const catOf = c => (c === "PDR" ? "PDR" : "FILTRE");
-const catPill = c => '<span class="pill ' + (c === "PDR" ? "p-acc" : "p-info") + '">' + (c === "PDR" ? "PDR" : "Filtre") + "</span>";
+const catOf = c => (c === "PDR" || c === "CONSOMMABLE" ? c : "FILTRE");
+const catLbl = c => c === "PDR" ? "PDR" : c === "CONSOMMABLE" ? "Consommable" : "Filtre";
+const catPill = c => '<span class="pill ' + (c === "PDR" ? "p-acc" : c === "CONSOMMABLE" ? "p-warn" : "p-info") + '">' + catLbl(c) + "</span>";
 function catTabs(cur, withAll) {
-  const items = (withAll ? [["", "Tout"]] : []).concat([["FILTRE", "Filtres"], ["PDR", "PDR (pièces de rechange)"]]);
+  const items = (withAll ? [["", "Tout"]] : []).concat([["FILTRE", "Filtres"], ["PDR", "PDR (pièces de rechange)"], ["CONSOMMABLE", "Consommables"]]);
   return '<div class="subtabs" role="tablist">' + items.map(([k, l]) => '<button class="btn" data-cat="' + k + '" aria-pressed="' + (cur === k) + '">' + l + "</button>").join("") + "</div>";
 }
 
@@ -89,8 +91,8 @@ function compute() {
   const label = eng => { if (!eng) return "Stock commun"; const e = engMap.get(String(eng)); return e ? [e.designation, e.marque, e.modele].filter(Boolean).join(" ") : "⚠ Engin inconnu"; };
   const out = [];
   for (const l of lines.values()) { const i = info(l.ref, l.cat); l.type = i.type; l.marque = i.marque; l.equiv = i.equiv; const ck = l.cat + "|" + l.ref;
-    const defSeuil = N(l.cat === "PDR" ? (S.params.seuil_pdr ?? S.params.seuil ?? 1) : (S.params.seuil ?? 1));
-    l.seuil = l.cat === "PDR" ? 0 : (l.hasMin ? l.minSum : (maxMinRef.has(ck) ? maxMinRef.get(ck) : defSeuil));  // PDR : pas de seuil (RUPTURE ou OK)
+    const defSeuil = N(l.cat !== "FILTRE" ? (S.params.seuil_pdr ?? S.params.seuil ?? 1) : (S.params.seuil ?? 1));
+    l.seuil = l.cat !== "FILTRE" ? 0 : (l.hasMin ? l.minSum : (maxMinRef.has(ck) ? maxMinRef.get(ck) : defSeuil));  // PDR : pas de seuil (RUPTURE ou OK)
     l.stock = l.dep + l.ent - l.sor; l.statut = l.stock <= 0 ? "RUPTURE" : (l.stock <= l.seuil ? "ALERTE" : "OK"); l.label = label(l.engin); out.push(l); }
   out.sort((a, b) => a.cat.localeCompare(b.cat) || (a.engin || "~").localeCompare(b.engin || "~", undefined, { numeric: true }) || a.ref.localeCompare(b.ref));
   for (const s of sor) { s.type = info(String(s.ref), s.cat).type; s.label = label(s.engin); }
@@ -196,7 +198,7 @@ function feed(list) { if (!list.length) return '<div class="empty">Rien pour l\'
 function bcAttente() { if (!S.canDA || !S.bc) return [];
   const out = []; for (const x of S.bcl.values()) { const b = S.bc.get(x.bc); if (!b || b.solde) continue; const liv = livreBcl(x.id), reste = x.qte - liv; if (reste <= 0) continue;
     const l = S.daL.get(x.dal) || {}, d = S.da.get(b.da) || {}, i = (C && l.ref ? C.info(l.ref) : null) || {};
-    out.push({ fromBc: b.id, cat: (d.type === "FILTRE" || d.type === "PDR" ? d.type : i.cat) || (d.type === "CONSOMMABLE" ? "PDR" : "FILTRE"), date: b.date || d.date, ref: l.ref || l.designation, type: l.designation, engin: l.engin || "", dem: x.qte, liv, reste, bc: b.num, bl: blsOf(b.id).map(y => y.num).join(", ") }); }
+    out.push({ fromBc: b.id, cat: (d.type === "FILTRE" || d.type === "PDR" || d.type === "CONSOMMABLE" ? d.type : i.cat) || "FILTRE", date: b.date || d.date, ref: l.ref || l.designation, type: l.designation, engin: l.engin || "", dem: x.qte, liv, reste, bc: b.num, bl: blsOf(b.id).map(y => y.num).join(", ") }); }
   return out; }
 const attActs = x => x.fromBc ? '<div class="rowact"><button class="btn small" data-act="bc-view" data-id="' + x.fromBc + '">Voir BC</button></div>' : rowActs("entree", x);
 
@@ -218,7 +220,7 @@ VIEWS.dash = { title: "Tableau de bord", body() {
   const row = cat => { const L = C.lines.filter(l => l.cat === cat), rup = L.filter(l => l.statut === "RUPTURE").length, al = L.filter(l => l.statut === "ALERTE").length;
     const reste = att.filter(e => e.cat === cat).reduce((t, e) => t + e.reste, 0), mois = C.sor.filter(s => s.cat === cat && !s.tr && (s.date || "") >= m0).reduce((t, s) => t + N(s.qte), 0);
     return '<h3 class="kpi-title">' + catPill(cat) + " " + CATS[cat].label + '</h3><div class="kpis">' + kpi(CATS[cat].label + " en stock", nb(sumStock(L))) + kpi("Lignes de stock", nb(L.length)) + kpi("En rupture", nb(rup), "crit") +
-      (cat === "PDR" ? "" : kpi("En alerte", nb(al), "warn")) + kpi("Commandés non livrés", nb(reste), "acc") + kpi("Sortis ce mois", nb(mois)) + "</div>"; };
+      (cat !== "FILTRE" ? "" : kpi("En alerte", nb(al), "warn")) + kpi("Commandés non livrés", nb(reste), "acc") + kpi("Sortis ce mois", nb(mois)) + "</div>"; };
   const daN = S.canNumDA ? daPending().length : 0;
   let h = (daN ? '<div class="banner crit">🔔 ' + daN + " demande(s) d'achat en attente du N° DA. <button class=\"btn small\" data-view-go=\"da\">Ouvrir « Création DA »</button></div>" : "") + row("FILTRE") + row("PDR");
   h += '<div class="panel"><h3>Nouveautés ' + (S.lastSeen ? "depuis votre dernière visite <small>(" + fDT(S.lastSeen) + ")</small>" : "<small>des 7 derniers jours</small>") + '<button class="btn small" data-act="seen" style="margin-left:auto">Marquer comme lu</button></h3>' +
@@ -268,7 +270,7 @@ VIEWS.sorties = { title: () => "Sorties – " + CATS[S.f.cat].label,
   rows() { const q = norm(S.f.sorQ), tr = S.f.sorMode === "tr"; return C.sor.filter(s => s.cat === S.f.cat && !!s.tr === tr && inPeriod(s.date, S.f.sorFrom, S.f.sorTo) && (!q || norm([s.ref, s.engin, s.label, s.enginInit, s.intervention, s.atelier, s.obs, s.type, s.numTr, s.dest].join(" ")).includes(q))).reverse(); },
   body() { const r = this.rows(), K = CATS[S.f.cat];
     if (S.f.sorMode === "tr") return '<div class="more">' + r.length + " transfert(s) · " + nb(r.reduce((t, s) => t + N(s.qte), 0)) + " " + K.many + " transféré(e)s vers d'autres chantiers</div>" + table([
-      { h: "Catégorie", f: s => (s.cat === "PDR" ? "PDR" : "Filtre") }, { h: "Date", f: s => fD(s.date) }, { h: "N° bon transfert", f: s => mono(s.numTr) }, { h: "Référence", f: s => mono(s.ref) }, { h: "Désignation", f: s => esc(s.type) }, { h: "Qté", n: 1, f: s => "<b>" + nb(s.qte) + "</b>" },
+      { h: "Catégorie", f: s => catLbl(s.cat) }, { h: "Date", f: s => fD(s.date) }, { h: "N° bon transfert", f: s => mono(s.numTr) }, { h: "Référence", f: s => mono(s.ref) }, { h: "Désignation", f: s => esc(s.type) }, { h: "Qté", n: 1, f: s => "<b>" + nb(s.qte) + "</b>" },
       { h: "Code engin", f: s => s.enginInit ? mono(s.enginInit) : '<span class="muted">stock commun</span>' }, { h: "Chantier destination", f: s => "<b>" + esc(s.dest) + "</b>" }, { h: "Observation", f: s => esc(s.obs) },
       { h: "Saisi par", f: s => who(s.createdBy) }, { h: "", f: s => rowActs("sortie", s) }], r, { empty: "Aucun transfert de " + K.many + " vers un autre chantier." });
     return '<div class="more">' + r.length + " sortie(s) · " + nb(r.reduce((t, s) => t + N(s.qte), 0)) + " " + K.many + " sorti(e)s</div>" + table([
@@ -388,7 +390,7 @@ const fv = (ov, id) => { const el = ov.querySelector("#" + id); return el ? el.v
 const fnum = (ov, id) => { const v = fv(ov, id); return v === "" ? null : +v.replace(",", "."); };
 const F = (id, label, input, cls) => '<div class="field' + (cls ? " " + cls : "") + '"><label for="' + id + '">' + label + "</label>" + input + "</div>";
 const opts = (arr, sel) => arr.map(v => "<option" + (v === sel ? " selected" : "") + ">" + esc(v) + "</option>").join("");
-const catSel = (id, v) => '<select id="' + id + '"><option value="FILTRE"' + (v !== "PDR" ? " selected" : "") + '>Filtre</option><option value="PDR"' + (v === "PDR" ? " selected" : "") + ">PDR (pièce de rechange)</option></select>";
+const catSel = (id, v) => '<select id="' + id + '">' + Object.keys(CATS).map(k => '<option value="' + k + '"' + (catOf(v) === k ? " selected" : "") + ">" + catLbl(k) + "</option>").join("") + "</select>";
 async function must(q) { const { data, error } = await q; if (error) throw error; return data; }
 
 /* Désignation / type : liste imposée (Paramètres → Types de filtre) pour les filtres, saisie libre pour les PDR */
@@ -574,11 +576,11 @@ function pDate(v) {
 }
 const pNum = v => { if (v === "" || v === null || v === undefined) return null; if (typeof v === "number") return v; const x = parseFloat(String(v).replace(/\s/g, "").replace(",", ".")); return isFinite(x) ? x : NaN; };
 const pStr = v => { if (v === null || v === undefined) return ""; if (typeof v === "number") return Number.isInteger(v) ? String(v) : String(v); return String(v).trim(); };
-const pCat = (v, def) => { const s = nh(v); if (!s) return def; if (s.startsWith("pdr") || s.startsWith("piece") || s.includes("rechange")) return "PDR"; if (s.startsWith("filt")) return "FILTRE"; return null; };
+const pCat = (v, def) => { const s = nh(v); if (!s) return def; if (s.startsWith("pdr") || s.startsWith("piece") || s.includes("rechange")) return "PDR"; if (s.startsWith("filt")) return "FILTRE"; if (s.startsWith("conso")) return "CONSOMMABLE"; return null; };
 function buildRow(kind, cells, map, defCat) {
   const g = k => (k in map ? cells[map[k]] : ""), errs = [], warns = [];
   if (IMPORT[kind].oil) return buildOilRow(kind, g);
-  const cat = pCat(g("cat"), defCat); if (!cat) errs.push("catégorie inconnue (Filtre ou PDR)");
+  const cat = pCat(g("cat"), defCat); if (!cat) errs.push("catégorie inconnue (Filtre, PDR ou Consommable)");
   const dt = pDate(g("date")); if (dt.err) errs.push(dt.err); if (dt.warn) warns.push(dt.warn);
   const ref = pStr(g("ref")); if (!ref) errs.push("référence vide");
   const eng = pStr(g("engin"));
@@ -643,8 +645,8 @@ function importDialog(kind) {
       if (missing.length) { box.innerHTML = '<div class="banner crit">Colonne(s) obligatoire(s) introuvable(s) : ' + esc(missing.join(", ")) + ". Utilisez le modèle ou renommez les en-têtes.</div>"; parsed = []; return; }
       const skipDup = ov.querySelector("#imp-dup").checked;
       const nErr = parsed.filter(p => p.errs.length).length, nDup = parsed.filter(p => !p.errs.length && p.warns.some(w => w.startsWith("doublon"))).length, nOk = parsed.length - nErr - (skipDup ? nDup : 0);
-      const nF = parsed.filter(p => !p.errs.length && p.cat === "FILTRE").length, nP = parsed.filter(p => !p.errs.length && p.cat === "PDR").length;
-      box.innerHTML = '<div class="banner ' + (nErr ? "crit" : "ok") + '">' + parsed.length + " ligne(s) lue(s) · <b>" + nOk + " à importer</b>" + (K.oil ? "" : " (" + nF + " filtre(s), " + nP + " PDR)") + (nErr ? " · " + nErr + " avec erreur (ignorées)" : "") + (nDup ? " · " + nDup + " doublon(s) possible(s)" : "") + "</div>" +
+      const nF = parsed.filter(p => !p.errs.length && p.cat === "FILTRE").length, nP = parsed.filter(p => !p.errs.length && p.cat === "PDR").length, nC = parsed.filter(p => !p.errs.length && p.cat === "CONSOMMABLE").length;
+      box.innerHTML = '<div class="banner ' + (nErr ? "crit" : "ok") + '">' + parsed.length + " ligne(s) lue(s) · <b>" + nOk + " à importer</b>" + (K.oil ? "" : " (" + nF + " filtre(s), " + nP + " PDR" + (nC ? ", " + nC + " consommable(s)" : "") + ")") + (nErr ? " · " + nErr + " avec erreur (ignorées)" : "") + (nDup ? " · " + nDup + " doublon(s) possible(s)" : "") + "</div>" +
         '<p class="hint">Colonnes reconnues : ' + esc(recon.join(" · ")) + "</p>" +
         table(K.oil ? [{ h: "Ligne", n: 1, f: p => p.line }, { h: "État", f: p => p.errs.length ? '<span class="pill p-crit">Erreur</span>' : (p.warns.length ? '<span class="pill p-warn">À vérifier</span>' : '<span class="pill p-ok">OK</span>') },
           { h: "Date", f: p => fD(p.row.date) }, { h: "Huile", f: p => esc(p.ref || "") }, { h: "Détail", f: p => esc(p.info) }, { h: "Remarque", f: p => esc(p.errs.concat(p.warns).join(" · ")) }] :
@@ -850,7 +852,7 @@ function blForm(b, num) {
   const html = head + '<div class="fgrid">' + F("bl-n2", "N° BL *", '<input id="bl-n2" value="' + esc(num) + '">') + F("bl-date", "Date de réception", '<input id="bl-date" type="date" value="' + today() + '">') + "</div>" +
     '<div class="tw le"><table><thead><tr><th style="width:105px">Catégorie</th><th>N° Poste</th><th>Désignation Catalogue</th><th>Référence</th><th style="width:120px">Référence équi.</th><th style="width:110px">Marque</th><th>Unité</th><th class="n">Qté BC</th><th class="n">Déjà livré</th><th class="n">Reste</th><th class="n" style="width:95px">Qté BL</th><th>Code_Engin</th></tr></thead><tbody>' +
     L.map(({ x, l, liv }) => { const i = info(l), reste = Math.max(0, x.qte - liv), off = reste <= 0;
-      return '<tr data-x="' + x.id + '" data-r="' + reste + '"' + (off ? ' class="muted"' : "") + '><td><select class="bl-cat"' + (off ? " disabled" : "") + '><option value="FILTRE"' + ((i.cat || (d.type === "CONSOMMABLE" ? "PDR" : d.type) || "FILTRE") !== "PDR" ? " selected" : "") + '>Filtre</option><option value="PDR"' + ((i.cat || (d.type === "CONSOMMABLE" ? "PDR" : d.type) || "FILTRE") === "PDR" ? " selected" : "") + '>PDR</option></select></td><td>' + esc(l.poste) + "</td><td>" + esc(l.designation) + "</td><td>" + mono(l.ref) +
+      return '<tr data-x="' + x.id + '" data-r="' + reste + '"' + (off ? ' class="muted"' : "") + '><td><select class="bl-cat"' + (off ? " disabled" : "") + '>' + (cc => Object.keys(CATS).map(k => '<option value="' + k + '"' + (cc === k ? " selected" : "") + ">" + catLbl(k) + "</option>").join(""))(catOf(i.cat || d.type || "FILTRE")) + '</select></td><td>' + esc(l.poste) + "</td><td>" + esc(l.designation) + "</td><td>" + mono(l.ref) +
         '</td><td><input class="bl-eq" value="' + esc(i.equiv || "") + '"' + (off ? " disabled" : "") + '></td><td><input class="bl-ma" list="dl-marques" value="' + esc(i.marque || "") + '"' + (off ? " disabled" : "") + "></td><td>" + esc(l.unite) + '</td><td class="n"><b>' + nb(x.qte) + '</b></td><td class="n">' + nb(liv) +
         '</td><td class="n">' + (reste > 0 ? '<span class="reste">' + nb(reste) + "</span>" : "0") + '</td><td><input class="bl-q" type="number" min="0" step="any" value="' + reste + '"' + (off ? " disabled" : "") + "></td><td>" + mono(l.engin) + "</td></tr>"; }).join("") +
     '</tbody></table></div><p class="hint">Saisissez la quantité réellement livrée (0 si l\'article manque). Chaque ligne livrée est ajoutée dans <b>Entrées (BC / BL)</b>. Le reste reste attendu sur ce BC : un autre BL pourra le recevoir, ou « Solder » le BC s\'il ne sera jamais livré.</p>';
@@ -2351,7 +2353,7 @@ function geFiche(code, ml) {
     { h: "Toutes dates", n: 1, f: o => "<b>" + L_(o.qa) + '</b> <span class="muted">(' + o.na + ")</span>" }, { h: "Dernière conso", f: o => fD(o.last) }], byH, { empty: "Aucune consommation saisie pour cet engin dans Suivi huiles." }) +
     '<p class="hint" style="margin:6px 0 0">Entre parenthèses : nombre d\'interventions. La période est celle des reportings choisis.</p>' +
     "<h4>Vidanges</h4>" + table([{ h: "Date", f: v => fD(v.date) }, { h: "Source", f: v => esc(v.src) }, { h: "Détail", f: v => v.huile ? esc(v.huile) + " · " + L_(v.qte) : (v.cpt ? "compteur " + nb(v.cpt) : "") }], V.list, { empty: "Aucune vidange sur la période." }) + "</div></div>";
-  if (sor.length) h += "<h4>Filtres et PDR sortis du magasin</h4>" + table([{ h: "Date", f: s => fD(s.date) }, { h: "Catégorie", f: s => esc(s.cat) }, { h: "Référence", f: s => mono(s.ref) }, { h: "Qté", n: 1, f: s => nb(s.qte) }, { h: "Intervention", f: s => esc(s.intervention) }, { h: "Engin initial", f: s => mono(s.enginInit) }], sor.sort((a, b) => (b.date || "").localeCompare(a.date || "")));
+  if (sor.length) h += "<h4>Filtres et PDR sortis du magasin</h4>" + table([{ h: "Date", f: s => fD(s.date) }, { h: "Catégorie", f: s => esc(catLbl(s.cat)) }, { h: "Référence", f: s => mono(s.ref) }, { h: "Qté", n: 1, f: s => nb(s.qte) }, { h: "Intervention", f: s => esc(s.intervention) }, { h: "Engin initial", f: s => mono(s.enginInit) }], sor.sort((a, b) => (b.date || "").localeCompare(a.date || "")));
   return h + "</div>";
 }
 function geListForm() { const L = GE.mois.slice().sort((a, b) => b.mois.localeCompare(a.mois));
@@ -2532,7 +2534,7 @@ document.addEventListener("click", async e => { const b = e.target.closest("[dat
     if (a === "my-pw") { const p1 = $("#pw1").value, p2 = $("#pw2").value; if (p1.length < 8) { $("#pw-err").textContent = "Au moins 8 caractères."; return; } if (p1 !== p2) { $("#pw-err").textContent = "Les deux mots de passe ne sont pas identiques."; return; }
       const { error } = await sb.auth.updateUser({ password: p1 }); if (error) { $("#pw-err").textContent = errMsg(error); return; } $("#pw1").value = $("#pw2").value = ""; $("#pw-err").textContent = ""; toast("Mot de passe changé."); return; }
     if (a === "logout") { await sb.auth.signOut(); location.reload(); return; }
-    const catName = c => c === "PDR" ? "PDR" : "Filtre";
+    const catName = catLbl;
     if (a === "xls-stock") return xls("Stock_" + (S.f.stockCat || "filtres_PDR") + "_" + today() + ".xlsx", "Stock actuel", VIEWS.stock.rows().map(l => ({ "Catégorie": catName(l.cat), "Affectation": l.engin || "Commun", "Engin": l.label, "Référence": l.ref, "Désignation / type": l.type, "Marque": l.marque, "Réf. équiv.": l.equiv, "Départ": l.dep, "Entrées": l.ent, "Sorties": l.sor, "Stock": l.stock, "Seuil": l.seuil, "Statut": l.statut, "Dernière entrée": fD(l.lastE), "Dernière sortie": fD(l.lastS) })));
     if (a === "xls-ent") return xls("Entrees_" + S.f.cat + "_" + today() + ".xlsx", "Entrées", VIEWS.entrees.rows().map(x => ({ "Catégorie": catName(x.cat), "Date": fD(x.date), "Référence": x.ref, "Désignation / type": x.type, "Marque": x.marque, "Réf. équivalentes": x.equiv, "Qté demandée (BC)": x.dem ?? "", "Qté livrée (BL)": x.liv ?? "", "Reste à livrer": x.reste || "", "N° BC": x.bc, "N° BL": x.bl, "Fournisseur": x.fourn, "Engin destinataire": x.engin || "", "Observations": x.obs, "Saisi par": x.createdBy ? nameOf(x.createdBy) : "Import" })));
     if (a === "xls-sor" && S.f.sorMode === "tr") return xls("Transferts_" + S.f.cat + "_" + today() + ".xlsx", "Transferts", VIEWS.sorties.rows().map(s => ({ "Catégorie": catName(s.cat), "Date": fD(s.date), "N° bon transfert": s.numTr, "Référence": s.ref, "Désignation": s.type, "Quantité": s.qte, "Code engin": s.enginInit, "Chantier destination": s.dest, "Observation": s.obs, "Saisi par": s.createdBy ? nameOf(s.createdBy) : "" })));
@@ -2554,7 +2556,7 @@ function applyHeader() { $("#app-chantier").textContent = S.params.nom_chantier 
 let tmr = null, pFull = false;
 function schedule(full) { pFull = pFull || !!full; if (tmr) return; tmr = setTimeout(() => { tmr = null; const f = pFull; pFull = false; if (!S.loaded) return; compute(); fillLists(); render(f); }, 120); }
 function fillLists() {
-  $("#dl-refs").innerHTML = C.refs.map(r => { const i = C.info(r); return '<option value="' + esc(r) + '">' + esc((i.cat === "PDR" ? "PDR · " : "") + i.type) + "</option>"; }).join("");
+  $("#dl-refs").innerHTML = C.refs.map(r => { const i = C.info(r); return '<option value="' + esc(r) + '">' + esc((i.cat === "PDR" ? "PDR · " : i.cat === "CONSOMMABLE" ? "Consommable · " : "") + i.type) + "</option>"; }).join("");
   $("#dl-engins").innerHTML = [...S.engins.values()].map(e => '<option value="' + esc(e.code) + '">' + esc([e.designation, e.marque, e.modele].filter(Boolean).join(" ")) + "</option>").join("");
   const t = new Set(S.params.types || []); C.lines.forEach(l => l.type && t.add(l.type)); $("#dl-types").innerHTML = [...t].map(x => '<option value="' + esc(x) + '">').join("");
   const fo = new Set(); C.ent.forEach(e => e.fourn && fo.add(e.fourn)); $("#dl-fourn").innerHTML = [...fo].sort().map(x => '<option value="' + esc(x) + '">').join("");
@@ -2574,7 +2576,7 @@ async function startApp() {
   S.role = me.role; S.isAdmin = me.role === "admin"; S.canWrite = S.isAdmin || me.role === "saisie" || me.role === "magasinier";
   S.canDA = ["admin", "gestionnaire", "magasinier", "saisie"].includes(me.role); S.canCreateDA = S.canDA; S.canNumDA = ["admin", "magasinier"].includes(me.role); S.lastSeen = me.last_seen || null; touchVisit();
   $("#me-box").innerHTML = '<span class="who">' + avatar(S.uid) + '<span class="nm">' + esc(me.nom || me.identifiant) + "</span></span>" + '<span class="role ' + (S.isAdmin ? "admin" : "") + '">' + esc(ROLE_FR[me.role]) + '</span><button class="btn small" data-act="logout">Déconnexion</button>';
-  try { const v = localStorage.getItem("fc-view"); if (v && canSee(v)) S.view = v; else if (!S.isAdmin) S.view = "stock"; const c = localStorage.getItem("fc-cat"); if (c === "PDR" || c === "FILTRE") S.f.cat = c; } catch (_) {}
+  try { const v = localStorage.getItem("fc-view"); if (v && canSee(v)) S.view = v; else if (!S.isAdmin) S.view = "stock"; const c = localStorage.getItem("fc-cat"); if (CATS[c]) S.f.cat = c; } catch (_) {}
   const [eng, dep, ent, sor, par, jr] = await Promise.all([fetchAll("engins", "code"), fetchAll("stock_depart", "id"), fetchAll("entrees", "id"), fetchAll("sorties", "id"),
     must(sb.from("params").select("*").eq("id", 1).maybeSingle()), must(sb.from("journal").select("*").order("at", { ascending: false }).limit(1000))]);
   S.engins = new Map(eng.map(r => [String(r.code), mapG(r)])); S.depart = new Map(dep.map(r => [r.id, mapD(r)])); S.entrees = new Map(ent.map(r => [r.id, mapE(r)])); S.sorties = new Map(sor.map(r => [r.id, mapS(r)]));
