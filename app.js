@@ -57,7 +57,7 @@ let C = null;
 
 /* ---------- correspondance base <-> application ---------- */
 const mapE = r => ({ id: r.id, fourn: r.fournisseur || "", cat: catOf(r.categorie), date: r.date, ref: r.ref, type: r.type || "", marque: r.marque || "", equiv: r.equiv || "", dem: r.qte_bc, liv: r.qte_bl, bc: r.num_bc || "", bl: r.num_bl || "", engin: r.engin || "", obs: r.obs || "", source: r.source, createdAt: r.created_at, createdBy: r.created_by, updatedAt: r.updated_at, updatedBy: r.updated_by });
-const mapS = r => ({ id: r.id, cat: catOf(r.categorie), date: r.date, engin: r.engin || "", enginInit: r.engin_initial || "", compteur: r.compteur, intervention: r.intervention || "", ref: r.ref, qte: r.qte, atelier: r.atelier || "", obs: r.obs || "", source: r.source, createdAt: r.created_at, createdBy: r.created_by, updatedAt: r.updated_at, updatedBy: r.updated_by });
+const mapS = r => ({ id: r.id, cat: catOf(r.categorie), date: r.date, engin: r.engin || "", enginInit: r.engin_initial || "", compteur: r.compteur, intervention: r.intervention || "", ref: r.ref, qte: r.qte, atelier: r.atelier || "", obs: r.obs || "", source: r.source, tr: !!r.transfert, numTr: r.num_transfert || "", dest: r.chantier_dest || "", createdAt: r.created_at, createdBy: r.created_by, updatedAt: r.updated_at, updatedBy: r.updated_by });
 const mapG = r => ({ code: String(r.code), designation: r.designation || "", marque: r.marque || "", modele: r.modele || "", serie: r.serie || "", unite: r.unite || "", intervalle: r.intervalle, statut: r.statut || "",
   refs: { huile: r.ref_huile || "", gasoil: r.ref_gasoil || "", separateur: r.ref_separateur || "", airP: r.ref_air_p || "", airS: r.ref_air_s || "", hydraulique: r.ref_hydraulique || "", transmission: r.ref_transmission || "" } });
 const mapD = r => ({ id: r.id, cat: catOf(r.categorie), date: r.date_inv || "", engin: r.engin || "", ref: r.ref, type: r.type || "", marque: r.marque || "", equiv: r.equiv || "", qte: r.qte, min: r.stock_min, empl: r.emplacement || "", obs: r.obs || "" });
@@ -216,7 +216,7 @@ const VIEWS = {};
 VIEWS.dash = { title: "Tableau de bord", body() {
   const att = C.ent.filter(e => e.reste > 0).concat(bcAttente()), news = newsList(), m0 = monthStart();
   const row = cat => { const L = C.lines.filter(l => l.cat === cat), rup = L.filter(l => l.statut === "RUPTURE").length, al = L.filter(l => l.statut === "ALERTE").length;
-    const reste = att.filter(e => e.cat === cat).reduce((t, e) => t + e.reste, 0), mois = C.sor.filter(s => s.cat === cat && (s.date || "") >= m0).reduce((t, s) => t + N(s.qte), 0);
+    const reste = att.filter(e => e.cat === cat).reduce((t, e) => t + e.reste, 0), mois = C.sor.filter(s => s.cat === cat && !s.tr && (s.date || "") >= m0).reduce((t, s) => t + N(s.qte), 0);
     return '<h3 class="kpi-title">' + catPill(cat) + " " + CATS[cat].label + '</h3><div class="kpis">' + kpi(CATS[cat].label + " en stock", nb(sumStock(L))) + kpi("Lignes de stock", nb(L.length)) + kpi("En rupture", nb(rup), "crit") +
       (cat === "PDR" ? "" : kpi("En alerte", nb(al), "warn")) + kpi("Commandés non livrés", nb(reste), "acc") + kpi("Sortis ce mois", nb(mois)) + "</div>"; };
   const daN = S.canNumDA ? daPending().length : 0;
@@ -261,11 +261,17 @@ VIEWS.entrees = { title: () => "Entrées – " + CATS[S.f.cat].label,
     { h: "Observations", f: e => esc(e.obs) }, { h: "Saisi par", f: e => who(e.createdBy) }, { h: "", f: e => rowActs("entree", e) }], r, { empty: "Aucune entrée de " + K.many + "." }); } };
 
 VIEWS.sorties = { title: () => "Sorties – " + CATS[S.f.cat].label,
-  tools: () => catTabs(S.f.cat) + '<div class="tools">' + searchF("so-q", S.f.sorQ, "Réf., engin, intervention…") + field("so-f", "Du", '<input id="so-f" type="date" value="' + esc(S.f.sorFrom) + '">') + field("so-t", "Au", '<input id="so-t" type="date" value="' + esc(S.f.sorTo) + '">') +
-    '<span class="grow"></span><button class="btn" data-act="xls-sor">Exporter Excel</button>' + (S.canWrite ? '<button class="btn" data-act="imp-sorties">Importer Excel</button><button class="btn primary" data-act="new-sortie">+ Nouvelle sortie</button>' : "") + "</div>",
+  tools: () => catTabs(S.f.cat) + '<div class="chips" style="margin:0 0 8px"><button type="button" class="btn small' + (S.f.sorMode !== "tr" ? " primary" : "") + '" data-act="so-mode" data-id="so">Sorties</button><button type="button" class="btn small' + (S.f.sorMode === "tr" ? " primary" : "") + '" data-act="so-mode" data-id="tr">⇄ Transferts vers autres chantiers</button></div>' +
+    '<div class="tools">' + searchF("so-q", S.f.sorQ, S.f.sorMode === "tr" ? "Réf., N° bon, chantier…" : "Réf., engin, intervention…") + field("so-f", "Du", '<input id="so-f" type="date" value="' + esc(S.f.sorFrom) + '">') + field("so-t", "Au", '<input id="so-t" type="date" value="' + esc(S.f.sorTo) + '">') +
+    '<span class="grow"></span><button class="btn" data-act="xls-sor">Exporter Excel</button>' + (S.canWrite ? (S.f.sorMode === "tr" ? "" : '<button class="btn" data-act="imp-sorties">Importer Excel</button>') + '<button class="btn" data-act="new-transfert" title="Filtres ou PDR transférés à un autre chantier">⇄ Transfert</button><button class="btn primary" data-act="new-sortie">+ Nouvelle sortie</button>' : "") + "</div>",
   bind() { ["so-q", "so-f", "so-t"].forEach(id => $("#" + id).addEventListener(id === "so-q" ? "input" : "change", () => { S.f.sorQ = $("#so-q").value; S.f.sorFrom = $("#so-f").value; S.f.sorTo = $("#so-t").value; render(); })); },
-  rows() { const q = norm(S.f.sorQ); return C.sor.filter(s => s.cat === S.f.cat && inPeriod(s.date, S.f.sorFrom, S.f.sorTo) && (!q || norm([s.ref, s.engin, s.label, s.enginInit, s.intervention, s.atelier, s.obs, s.type].join(" ")).includes(q))).reverse(); },
-  body() { const r = this.rows(), K = CATS[S.f.cat]; return '<div class="more">' + r.length + " sortie(s) · " + nb(r.reduce((t, s) => t + N(s.qte), 0)) + " " + K.many + " sorti(e)s</div>" + table([
+  rows() { const q = norm(S.f.sorQ), tr = S.f.sorMode === "tr"; return C.sor.filter(s => s.cat === S.f.cat && !!s.tr === tr && inPeriod(s.date, S.f.sorFrom, S.f.sorTo) && (!q || norm([s.ref, s.engin, s.label, s.enginInit, s.intervention, s.atelier, s.obs, s.type, s.numTr, s.dest].join(" ")).includes(q))).reverse(); },
+  body() { const r = this.rows(), K = CATS[S.f.cat];
+    if (S.f.sorMode === "tr") return '<div class="more">' + r.length + " transfert(s) · " + nb(r.reduce((t, s) => t + N(s.qte), 0)) + " " + K.many + " transféré(e)s vers d'autres chantiers</div>" + table([
+      { h: "Catégorie", f: s => (s.cat === "PDR" ? "PDR" : "Filtre") }, { h: "Date", f: s => fD(s.date) }, { h: "N° bon transfert", f: s => mono(s.numTr) }, { h: "Référence", f: s => mono(s.ref) }, { h: "Désignation", f: s => esc(s.type) }, { h: "Qté", n: 1, f: s => "<b>" + nb(s.qte) + "</b>" },
+      { h: "Code engin", f: s => s.enginInit ? mono(s.enginInit) : '<span class="muted">stock commun</span>' }, { h: "Chantier destination", f: s => "<b>" + esc(s.dest) + "</b>" }, { h: "Observation", f: s => esc(s.obs) },
+      { h: "Saisi par", f: s => who(s.createdBy) }, { h: "", f: s => rowActs("sortie", s) }], r, { empty: "Aucun transfert de " + K.many + " vers un autre chantier." });
+    return '<div class="more">' + r.length + " sortie(s) · " + nb(r.reduce((t, s) => t + N(s.qte), 0)) + " " + K.many + " sorti(e)s</div>" + table([
     { h: "Date", f: s => fD(s.date) }, { h: "Monté sur", f: s => mono(s.engin) }, { h: "Engin", f: s => esc(s.label) }, { h: "Référence", f: s => mono(s.ref) }, { h: K.type, f: s => esc(s.type) }, { h: "Qté", n: 1, f: s => nb(s.qte) },
     { h: "Pris sur", f: s => mvtPill(s) }, { h: "Intervention", f: s => esc(s.intervention) }, { h: "Compteur", n: 1, f: s => nb(s.compteur) }, { h: "Atelier", f: s => esc(s.atelier) }, { h: "Observations", f: s => esc(s.obs) },
     { h: "Saisi par", f: s => who(s.createdBy) }, { h: "", f: s => rowActs("sortie", s) }], r, { empty: "Aucune sortie de " + K.many + "." }); } };
@@ -439,6 +445,30 @@ function sortieForm(d) { d = d || { date: today(), cat: S.f.cat, intervention: S
   ["s-engin", "s-ref", "s-init", "s-cat"].forEach(id => ov.querySelector("#" + id).addEventListener("change", upd)); upd();
 }
 
+/* transfert de filtres / PDR vers un autre chantier : sortie de stock sans engin monté (pris sur le stock d'un engin ou le stock commun) */
+function transfertForm(d) { d = d || { date: today(), cat: S.f.cat, qte: 1 }; const isNew = !d.id;
+  const dests = [...new Set(C.sor.filter(s => s.tr && s.dest).map(s => s.dest))].sort();
+  const html = '<div class="fgrid">' + F("t-cat", "Catégorie", catSel("t-cat", d.cat)) + F("t-date", "Date *", '<input id="t-date" type="date" value="' + esc(d.date) + '">') + F("t-num", "N° bon transfert", '<input id="t-num" value="' + esc(d.numTr) + '">') +
+    F("t-ref", "Référence *", '<input id="t-ref" list="dl-refs" value="' + esc(d.ref) + '" autocomplete="off">') + F("t-des", "Désignation", '<input id="t-des" readonly tabindex="-1" placeholder="remplie d\'après la référence">') +
+    F("t-qte", "Quantité *", '<input id="t-qte" type="number" min="0" step="any" inputmode="decimal" value="' + esc(d.qte ?? 1) + '">') +
+    F("t-eng", "Code engin (facultatif)", '<input id="t-eng" list="dl-engins" value="' + esc(d.enginInit) + '" autocomplete="off"><div class="hint">Stock de l\'engin d\'où sort l\'article. Vide : stock commun.</div>') +
+    F("t-dest", "Chantier destination *", '<input id="t-dest" list="dl-tr-dest" value="' + esc(d.dest) + '" autocomplete="off"><datalist id="dl-tr-dest">' + dests.map(x => '<option value="' + esc(x) + '">').join("") + "</datalist>") +
+    F("t-obs", "Observation", '<input id="t-obs" value="' + esc(d.obs) + '">', "full") + '<div class="hint full" id="t-info"></div></div>';
+  const engOf = ov => fv(ov, "t-eng").split(/\s+[–-]\s+/)[0].trim();
+  const ov = modal(isNew ? "Transfert vers un autre chantier" : "Modifier le transfert", html, async ov => {
+    const ref = fv(ov, "t-ref"), qte = fnum(ov, "t-qte"), eng = engOf(ov), dest = fv(ov, "t-dest"), date = fv(ov, "t-date");
+    if (!date) return "Saisissez la date."; if (!ref) return "Saisissez la référence."; if (!qte || qte <= 0) return "La quantité doit être supérieure à 0."; if (!dest) return "Saisissez le chantier de destination.";
+    const row = { categorie: fv(ov, "t-cat"), date, engin: null, engin_initial: eng || null, ref, qte, transfert: true, num_transfert: fv(ov, "t-num") || null, chantier_dest: dest, intervention: "Transfert", compteur: null, atelier: null, obs: fv(ov, "t-obs") || null };
+    if (isNew) { applyRow("sorties", await must(sb.from("sorties").insert(row).select().single())); toast("Transfert enregistré : " + nb(qte) + " × " + ref + " vers " + dest + "."); }
+    else { const r = await must(sb.from("sorties").update(row).eq("id", d.id).select()); if (!r.length) return "Modification refusée : vos droits ne le permettent pas."; applyRow("sorties", r[0]); toast("Transfert modifié."); }
+    S.f.sorMode = "tr"; if (S.view === "sorties") render(true); });
+  const upd = () => { const ref = fv(ov, "t-ref"), cat = fv(ov, "t-cat"), eng = engOf(ov), box = ov.querySelector("#t-info");
+    ov.querySelector("#t-des").value = ref ? C.info(ref, cat).type || "" : ""; if (!ref) { box.textContent = ""; box.className = "hint full"; return; }
+    const l = C.lineMap.get(KEY(cat, ref, eng)), dispo = l ? l.stock + (d.id && d.tr && d.ref === ref && (d.enginInit || "") === eng ? N(d.qte) : 0) : 0, q = fnum(ov, "t-qte") || 0;
+    if (!l) { box.className = "hint full crit"; box.textContent = "⚠ Aucun stock de cet article sur le " + (eng ? "stock de l'engin " + eng : "stock commun") + "."; }
+    else { box.className = "hint full " + (q > dispo ? "crit" : "ok"); box.textContent = "Pris sur le " + (eng ? "stock de l'engin " + eng : "stock commun") + " · disponible : " + nb(dispo) + (q > dispo ? " ⚠ quantité supérieure au stock" : ""); } };
+  ["t-ref", "t-cat", "t-eng", "t-qte"].forEach(id => ov.querySelector("#" + id).addEventListener("change", upd)); ov.querySelector("#t-qte").addEventListener("input", upd); upd();
+}
 function enginForm(code) { const e = code ? S.engins.get(code) : { refs: {} }; if (!e) return; const R = e.refs || {}, isNew = !code;
   const r = (k, l) => F("g-" + k, l, '<input id="g-' + k + '" list="dl-refs" value="' + esc(R[k]) + '">');
   const html = '<div class="fgrid">' + F("g-code", "Code engin *", '<input id="g-code" value="' + esc(e.code) + '"' + (isNew ? "" : " readonly") + ">") + F("g-des", "Désignation", '<input id="g-des" value="' + esc(e.designation) + '">') +
@@ -2479,13 +2509,15 @@ document.addEventListener("click", async e => { const b = e.target.closest("[dat
       if (a === "da-xls") return await daExcel([d], "DA_" + fileSafe(d.numero || ("interne_" + d.id)) + (d.engin ? "_" + fileSafe(d.engin) : "") + ".xlsx"); }
     if (a === "da-xls-all") { const r = VIEWS.suivida.rows(); if (!r.length) { toast("Aucune DA à exporter."); return; } return await daExcel(r, "Suivi_DA_" + today() + ".xlsx"); }
     if (a === "new-sortie") return sortieForm();
+    if (a === "new-transfert") return transfertForm();
+    if (a === "so-mode") { S.f.sorMode = id; return render(true); }
     if (a === "imp-entrees") return importDialog("entrees");
     if (a === "imp-sorties") return importDialog("sorties");
     if (a === "imp-depart") return importDialog("depart");
     if (a === "recv" || a === "edit-entree") { const d = S.entrees.get(+id); return d && entreeForm(Object.assign({}, d), a === "recv"); }
-    if (a === "edit-sortie") { const d = S.sorties.get(+id); return d && sortieForm(Object.assign({}, d)); }
+    if (a === "edit-sortie") { const d = S.sorties.get(+id); return d && (d.tr ? transfertForm(Object.assign({}, d)) : sortieForm(Object.assign({}, d))); }
     if (a === "del-entree") { const d = S.entrees.get(+id); return d && confirmBox("Supprimer l'entrée " + d.ref + " du " + fD(d.date) + " ? Le stock sera recalculé.", async () => { const r = await must(sb.from("entrees").delete().eq("id", d.id).select()); if (!r.length) throw new Error("permission denied"); S.entrees.delete(d.id); schedule(); toast("Entrée supprimée."); }); }
-    if (a === "del-sortie") { const d = S.sorties.get(+id); return d && confirmBox("Supprimer la sortie " + d.ref + " sur " + d.engin + " du " + fD(d.date) + " ?", async () => { const r = await must(sb.from("sorties").delete().eq("id", d.id).select()); if (!r.length) throw new Error("permission denied"); S.sorties.delete(d.id); schedule(); toast("Sortie supprimée."); }); }
+    if (a === "del-sortie") { const d = S.sorties.get(+id); return d && confirmBox(d.tr ? "Supprimer le transfert de " + d.ref + " vers " + d.dest + " du " + fD(d.date) + " ?" : "Supprimer la sortie " + d.ref + " sur " + d.engin + " du " + fD(d.date) + " ?", async () => { const r = await must(sb.from("sorties").delete().eq("id", d.id).select()); if (!r.length) throw new Error("permission denied"); S.sorties.delete(d.id); schedule(); toast("Sortie supprimée."); }); }
     if (a === "new-engin") return enginForm(null);
     if (a === "edit-engin") return enginForm(id);
     if (a === "new-dep") return depForm(null);
@@ -2503,6 +2535,7 @@ document.addEventListener("click", async e => { const b = e.target.closest("[dat
     const catName = c => c === "PDR" ? "PDR" : "Filtre";
     if (a === "xls-stock") return xls("Stock_" + (S.f.stockCat || "filtres_PDR") + "_" + today() + ".xlsx", "Stock actuel", VIEWS.stock.rows().map(l => ({ "Catégorie": catName(l.cat), "Affectation": l.engin || "Commun", "Engin": l.label, "Référence": l.ref, "Désignation / type": l.type, "Marque": l.marque, "Réf. équiv.": l.equiv, "Départ": l.dep, "Entrées": l.ent, "Sorties": l.sor, "Stock": l.stock, "Seuil": l.seuil, "Statut": l.statut, "Dernière entrée": fD(l.lastE), "Dernière sortie": fD(l.lastS) })));
     if (a === "xls-ent") return xls("Entrees_" + S.f.cat + "_" + today() + ".xlsx", "Entrées", VIEWS.entrees.rows().map(x => ({ "Catégorie": catName(x.cat), "Date": fD(x.date), "Référence": x.ref, "Désignation / type": x.type, "Marque": x.marque, "Réf. équivalentes": x.equiv, "Qté demandée (BC)": x.dem ?? "", "Qté livrée (BL)": x.liv ?? "", "Reste à livrer": x.reste || "", "N° BC": x.bc, "N° BL": x.bl, "Fournisseur": x.fourn, "Engin destinataire": x.engin || "", "Observations": x.obs, "Saisi par": x.createdBy ? nameOf(x.createdBy) : "Import" })));
+    if (a === "xls-sor" && S.f.sorMode === "tr") return xls("Transferts_" + S.f.cat + "_" + today() + ".xlsx", "Transferts", VIEWS.sorties.rows().map(s => ({ "Catégorie": catName(s.cat), "Date": fD(s.date), "N° bon transfert": s.numTr, "Référence": s.ref, "Désignation": s.type, "Quantité": s.qte, "Code engin": s.enginInit, "Chantier destination": s.dest, "Observation": s.obs, "Saisi par": s.createdBy ? nameOf(s.createdBy) : "" })));
     if (a === "xls-sor") return xls("Sorties_" + S.f.cat + "_" + today() + ".xlsx", "Sorties", VIEWS.sorties.rows().map(s => ({ "Catégorie": catName(s.cat), "Date": fD(s.date), "Code engin (monté sur)": s.engin, "Engin": s.label, "Engin initial": s.enginInit, "Compteur (h / km)": s.compteur ?? "", "Type d'intervention": s.intervention, "Référence": s.ref, "Désignation / type": s.type, "Quantité": s.qte, "Pris sur": mvtLabel(s), "Atelier": s.atelier, "Observations": s.obs, "Saisi par": s.createdBy ? nameOf(s.createdBy) : "Import" })));
   } catch (err) { toast(errMsg(err)); }
 });
