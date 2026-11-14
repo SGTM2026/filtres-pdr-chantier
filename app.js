@@ -2066,7 +2066,8 @@ const VL = { loaded: false, loading: null, list: [] };
 const vlLoad = force => { if (VL.loaded && !force) return Promise.resolve(); return VL.loading = fetchAll("vid_lances", "date_prevue").then(r => { VL.list = r; VL.loaded = true; VL.loading = null; if (S.view === "gplan") render(); }).catch(err => { VL.loading = null; VL.loaded = true; toast("Vidanges lancées : " + errMsg(err)); }); };
 const vlKey = (code, d) => code + "|" + d, vlGet = (code, d) => VL.list.find(v => v.code === code && v.date_prevue === d);
 let GP_ROWS = new Map();
-const gpPdfBtn = (code, ci) => '<button type="button" class="btn small" data-act="gp-gpdf" data-id="' + esc(code) + '" data-cyc="' + (ci || 0) + '" title="Télécharger la gamme de vidange de ce cycle (PDF)">Gamme PDF</button>';
+const gpPdfBtn = (code, ci) => '<button type="button" class="btn small" data-act="gp-gpdf" data-id="' + esc(code) + '" data-cyc="' + (ci || 0) + '" title="Télécharger la gamme de vidange de ce cycle (PDF)">Gamme PDF</button>' +
+  '<button type="button" class="btn small" data-act="ge-gamme" data-id="' + esc(code) + '" data-cyc="' + (ci || 0) + '" title="Ouvrir la feuille Gamme maintenance prv de cette vidange">Gamme</button>';
 function gplanAutres() { if (!VL.loaded) { if (!VL.loading) vlLoad(); return '<div class="empty">Chargement des vidanges lancées…</div>'; }
   const per = gpPeriode(), L = VL.list.filter(v => v.date_prevue >= per.d1 && v.date_prevue <= per.d2).sort((a, b) => a.date_prevue.localeCompare(b.date_prevue) || a.code.localeCompare(b.code));
   const cols = [{ h: "Date prévue", f: v => "<b>" + fD(v.date_prevue) + "</b>" }, { h: "Code", f: v => mono(v.code) }, { h: "Engin", f: v => esc(v.engin || "") || '<span class="muted">–</span>' }, { h: "Catégorie", f: v => esc(v.categorie || "") }, { h: "Type", f: v => esc(v.type || "") },
