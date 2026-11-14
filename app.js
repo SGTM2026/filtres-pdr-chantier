@@ -274,7 +274,7 @@ VIEWS.sorties = { title: () => "Sorties – " + CATS[S.f.cat].label,
       { h: "Code engin", f: s => s.enginInit ? mono(s.enginInit) : '<span class="muted">stock commun</span>' }, { h: "Chantier destination", f: s => "<b>" + esc(s.dest) + "</b>" }, { h: "Observation", f: s => esc(s.obs) },
       { h: "Saisi par", f: s => who(s.createdBy) }, { h: "", f: s => rowActs("sortie", s) }], r, { empty: "Aucun transfert de " + K.many + " vers un autre chantier." });
     return '<div class="more">' + r.length + " sortie(s) · " + nb(r.reduce((t, s) => t + N(s.qte), 0)) + " " + K.many + " sorti(e)s</div>" + table([
-    { h: "Date", f: s => fD(s.date) }, { h: "Monté sur", f: s => mono(s.engin) }, { h: "Engin", f: s => esc(s.label) }, { h: "Référence", f: s => mono(s.ref) }, { h: K.type, f: s => esc(s.type) }, { h: "Qté", n: 1, f: s => nb(s.qte) },
+    { h: "Date", f: s => fD(s.date) }, { h: "Monté sur", f: s => mono(s.engin) }, { h: "Engin", f: s => s.engin ? esc(s.label) : "" }, { h: "Référence", f: s => mono(s.ref) }, { h: K.type, f: s => esc(s.type) }, { h: "Qté", n: 1, f: s => nb(s.qte) },
     { h: "Pris sur", f: s => mvtPill(s) }, { h: "Intervention", f: s => esc(s.intervention) }, { h: "Compteur", n: 1, f: s => nb(s.compteur) }, { h: "Atelier", f: s => esc(s.atelier) }, { h: "Observations", f: s => esc(s.obs) },
     { h: "Saisi par", f: s => who(s.createdBy) }, { h: "", f: s => rowActs("sortie", s) }], r, { empty: "Aucune sortie de " + K.many + "." }); } };
 
@@ -398,6 +398,12 @@ const filtreTypes = () => S.params.types || [];
 const typeFieldHtml = (cat, v) => { if (cat !== "FILTRE" || !filtreTypes().length) return '<input id="f-type" list="dl-types" value="' + esc(v || "") + '">';
   return '<input id="f-type" data-strict="1" list="dl-ftypes" value="' + esc(v || "") + '" placeholder="Écrire ou choisir dans la liste" autocomplete="off"><datalist id="dl-ftypes">' + filtreTypes().map(x => '<option value="' + esc(x) + '">').join("") + "</datalist>"; };
 const matchFiltreType = v => { const k = nh(v); return k ? filtreTypes().find(x => nh(x) === k) || null : ""; };
+/* consommables : référence facultative → la désignation sert de référence ; champs propres aux filtres / PDR masqués */
+const fldOf = (ov, id) => { const el = ov.querySelector("#" + id); return el && el.closest(".field"); };
+const showF = (ov, ids, on) => ids.forEach(id => { const f = fldOf(ov, id); if (f) f.style.display = on ? "" : "none"; });
+const setLbl = (ov, id, t) => { const f = fldOf(ov, id), l = f && f.querySelector("label"); if (l) l.textContent = t; };
+/* retrouve la ligne de consommable d'après une désignation (même désignation ou même référence) */
+const consoRef = des => { const k = nh(des); if (!k) return ""; const l = C.lines.find(x => x.cat === "CONSOMMABLE" && (nh(x.ref) === k || nh(x.type) === k)); return l ? l.ref : des.trim().toUpperCase(); };
 function entreeForm(d, recv) { d = d || { date: today(), cat: S.f.cat }; const isNew = !d.id;
   const html = '<div class="fgrid">' + F("f-cat", "Catégorie", catSel("f-cat", d.cat)) + F("f-date", "Date", '<input id="f-date" type="date" value="' + esc(d.date) + '">') + F("f-ref", "Référence *", '<input id="f-ref" list="dl-refs" value="' + esc(d.ref) + '" autocomplete="off">') +
     F("f-type", "Désignation / type", '<span id="f-type-box">' + typeFieldHtml(d.cat, d.type) + "</span>") + F("f-marque", "Marque", '<input id="f-marque" list="dl-marques" value="' + esc(d.marque) + '">') + F("f-equiv", "Réf. équivalentes", '<input id="f-equiv" value="' + esc(d.equiv) + '">') +
@@ -405,7 +411,9 @@ function entreeForm(d, recv) { d = d || { date: today(), cat: S.f.cat }; const i
     F("f-liv", "Qté livrée (BL)", '<input id="f-liv" type="number" min="0" step="any" inputmode="decimal" value="' + esc(d.liv ?? "") + '"><div class="hint">Vide = pas encore livré. Livraison partielle : cumulez ici.</div>') +
     F("f-bc", "N° BC", '<input id="f-bc" value="' + esc(d.bc) + '">') + F("f-bl", "N° BL", '<input id="f-bl" value="' + esc(d.bl) + '">') + F("f-fourn", "Fournisseur", '<input id="f-fourn" list="dl-fourn" value="' + esc(d.fourn) + '">') + F("f-obs", "Observations", '<input id="f-obs" value="' + esc(d.obs) + '">', "full") + '<div class="hint full" id="f-info"></div></div>';
   const ov = modal(isNew ? "Nouvelle entrée" : (recv ? "Réception (BL)" : "Modifier l'entrée"), html, async ov => {
-    const ref = fv(ov, "f-ref"); if (!ref) return "Saisissez la référence."; if (!fv(ov, "f-date")) return "Saisissez la date.";
+    const cso = fv(ov, "f-cat") === "CONSOMMABLE"; let ref = fv(ov, "f-ref");
+    if (cso && !ref) { if (!fv(ov, "f-type")) return "Saisissez la référence ou la désignation du consommable."; ref = consoRef(fv(ov, "f-type")); }
+    if (!ref) return "Saisissez la référence."; if (!fv(ov, "f-date")) return "Saisissez la date.";
     const ft = ov.querySelector("#f-type");
     if (fv(ov, "f-cat") === "FILTRE" && ft.dataset.strict) { const v = fv(ov, "f-type"), m = matchFiltreType(v);
       if (!v) return "Saisissez la désignation / type du filtre (choisissez-la dans la liste).";
@@ -413,8 +421,8 @@ function entreeForm(d, recv) { d = d || { date: today(), cat: S.f.cat }; const i
       if (m) ft.value = m; }
     const dem = fnum(ov, "f-dem"), liv = fnum(ov, "f-liv"); if (dem === null && liv === null) return "Saisissez au moins la quantité demandée (BC) ou livrée (BL).";
     if ((dem !== null && dem < 0) || (liv !== null && liv < 0)) return "Les quantités ne peuvent pas être négatives.";
-    const eng = fv(ov, "f-engin"); if (eng && !C.engMap.has(eng)) return "Code engin inconnu : choisissez-le dans la liste (ou laissez vide pour le stock commun).";
-    const row = { categorie: fv(ov, "f-cat"), date: fv(ov, "f-date"), ref, type: fv(ov, "f-type") || null, marque: fv(ov, "f-marque") || null, equiv: fv(ov, "f-equiv") || null, qte_bc: dem, qte_bl: liv, num_bc: fv(ov, "f-bc") || null, num_bl: fv(ov, "f-bl") || null, fournisseur: fv(ov, "f-fourn") || null, engin: eng || null, obs: fv(ov, "f-obs") || null };
+    const eng = cso ? "" : fv(ov, "f-engin"); if (eng && !C.engMap.has(eng)) return "Code engin inconnu : choisissez-le dans la liste (ou laissez vide pour le stock commun).";
+    const row = { categorie: fv(ov, "f-cat"), date: fv(ov, "f-date"), ref, type: fv(ov, "f-type") || null, marque: fv(ov, "f-marque") || null, equiv: cso ? null : fv(ov, "f-equiv") || null, qte_bc: dem, qte_bl: liv, num_bc: fv(ov, "f-bc") || null, num_bl: fv(ov, "f-bl") || null, fournisseur: fv(ov, "f-fourn") || null, engin: eng || null, obs: fv(ov, "f-obs") || null };
     if (isNew) { applyRow("entrees", await must(sb.from("entrees").insert(row).select().single())); toast("Entrée enregistrée."); }
     else { const r = await must(sb.from("entrees").update(row).eq("id", d.id).select()); if (!r.length) return "Modification refusée : vos droits ne le permettent pas."; applyRow("entrees", r[0]); toast("Entrée modifiée."); }
   }, recv ? "Enregistrer la réception" : "Enregistrer");
@@ -422,29 +430,36 @@ function entreeForm(d, recv) { d = d || { date: today(), cat: S.f.cat }; const i
     if (ref && i && (i.type || i.marque)) { if (!fv(ov, "f-type")) { const ft = ov.querySelector("#f-type"); if (!ft.dataset.strict || matchFiltreType(i.type)) ft.value = ft.dataset.strict ? matchFiltreType(i.type) : i.type; } if (!fv(ov, "f-marque")) ov.querySelector("#f-marque").value = i.marque; if (!fv(ov, "f-equiv")) ov.querySelector("#f-equiv").value = i.equiv; }
     const eng = fv(ov, "f-engin"), l = ref ? C.lineMap.get(KEY(cat, ref, eng)) : null;
     box.textContent = ref ? (l ? "Stock actuel de cette ligne (" + (eng || "commun") + ") : " + nb(l.stock) : "Nouvelle ligne de stock : elle sera créée à la première livraison.") : ""; };
-  ov.querySelector("#f-cat").addEventListener("change", () => { const box = ov.querySelector("#f-type-box"), v = fv(ov, "f-type"); box.innerHTML = typeFieldHtml(fv(ov, "f-cat"), v); });
+  const eCat = () => { const c = fv(ov, "f-cat") === "CONSOMMABLE"; showF(ov, ["f-equiv", "f-engin"], !c); setLbl(ov, "f-ref", c ? "Référence (facultatif)" : "Référence *"); setLbl(ov, "f-type", c ? "Désignation *" : "Désignation / type"); };
+  ov.querySelector("#f-cat").addEventListener("change", () => { const box = ov.querySelector("#f-type-box"), v = fv(ov, "f-type"); box.innerHTML = typeFieldHtml(fv(ov, "f-cat"), v); eCat(); }); eCat();
   ["f-ref", "f-engin", "f-cat"].forEach(id => ov.querySelector("#" + id).addEventListener("change", upd)); upd();
   if (recv) { const el = ov.querySelector("#f-liv"); el.focus(); el.select && el.select(); }
 }
 
 function sortieForm(d) { d = d || { date: today(), cat: S.f.cat, intervention: S.f.cat === "PDR" ? (S.params.interventions.find(x => /panne/i.test(x)) || S.params.interventions[0]) : (S.params.interventions[0] || "Vidange"), atelier: S.params.ateliers[0] || "", qte: 1 }; const isNew = !d.id;
   const html = '<div class="fgrid">' + F("s-cat", "Catégorie", catSel("s-cat", d.cat)) + F("s-date", "Date", '<input id="s-date" type="date" value="' + esc(d.date) + '">') + F("s-engin", "Code engin (monté sur) *", '<input id="s-engin" list="dl-engins" value="' + esc(d.engin) + '" autocomplete="off">') +
-    F("s-ref", "Référence *", '<input id="s-ref" list="dl-refs" value="' + esc(d.ref) + '" autocomplete="off">') + F("s-qte", "Quantité *", '<input id="s-qte" type="number" min="0" step="any" inputmode="decimal" value="' + esc(d.qte ?? 1) + '">') +
+    F("s-ref", "Référence *", '<input id="s-ref" list="dl-refs" value="' + esc(d.ref) + '" autocomplete="off">') +
+    F("s-des", "Désignation", '<input id="s-des" list="dl-conso" value="' + esc(d.cat === "CONSOMMABLE" ? C.info(d.ref || "", "CONSOMMABLE").type || "" : "") + '" autocomplete="off"><datalist id="dl-conso">' + [...new Set(C.lines.filter(l => l.cat === "CONSOMMABLE").map(l => l.type || l.ref).filter(Boolean))].sort().map(x => '<option value="' + esc(x) + '">').join("") + "</datalist>") + F("s-qte", "Quantité *", '<input id="s-qte" type="number" min="0" step="any" inputmode="decimal" value="' + esc(d.qte ?? 1) + '">') +
     F("s-init", "Engin initial (si article emprunté)", '<input id="s-init" list="dl-engins" value="' + esc(d.enginInit) + '"><div class="hint">Vide : propre stock de l\'engin, sinon stock commun.</div>') +
     F("s-cpt", "Compteur (h / km)", '<input id="s-cpt" type="number" min="0" step="1" inputmode="numeric" value="' + esc(d.compteur ?? "") + '">') + F("s-int", "Type d'intervention", '<select id="s-int">' + opts(S.params.interventions, d.intervention) + "</select>") +
     F("s-at", "Atelier", '<select id="s-at"><option value=""></option>' + opts(d.atelier && !S.params.ateliers.includes(d.atelier) ? S.params.ateliers.concat([d.atelier]) : S.params.ateliers, d.atelier) + "</select>") + F("s-obs", "Observations", '<input id="s-obs" value="' + esc(d.obs) + '">', "full") + '<div class="hint full" id="s-info"></div></div>';
   const ov = modal(isNew ? "Nouvelle sortie" : "Modifier la sortie", html, async ov => {
-    const eng = fv(ov, "s-engin"), ref = fv(ov, "s-ref"), qte = fnum(ov, "s-qte"), init = fv(ov, "s-init");
-    if (!eng || !C.engMap.has(eng)) return "Choisissez le code engin dans la liste."; if (!ref) return "Saisissez la référence."; if (!qte || qte <= 0) return "La quantité doit être supérieure à 0.";
-    const row = { categorie: fv(ov, "s-cat"), date: fv(ov, "s-date"), engin: eng, engin_initial: init || null, compteur: fnum(ov, "s-cpt"), intervention: fv(ov, "s-int") || null, ref, qte, atelier: fv(ov, "s-at") || null, obs: fv(ov, "s-obs") || null };
+    const cso = fv(ov, "s-cat") === "CONSOMMABLE", eng = fv(ov, "s-engin"), qte = fnum(ov, "s-qte"), init = cso ? "" : fv(ov, "s-init"); let ref = fv(ov, "s-ref");
+    if (cso && !ref) { if (!fv(ov, "s-des")) return "Saisissez la référence ou la désignation du consommable."; ref = consoRef(fv(ov, "s-des")); }
+    if (cso ? (eng && !C.engMap.has(eng)) : (!eng || !C.engMap.has(eng))) return cso ? "Code engin inconnu : choisissez-le dans la liste ou laissez vide." : "Choisissez le code engin dans la liste."; if (!ref) return "Saisissez la référence."; if (!qte || qte <= 0) return "La quantité doit être supérieure à 0.";
+    const row = { categorie: fv(ov, "s-cat"), date: fv(ov, "s-date"), engin: eng || null, engin_initial: init || null, compteur: cso ? null : fnum(ov, "s-cpt"), intervention: cso ? null : fv(ov, "s-int") || null, ref, qte, atelier: fv(ov, "s-at") || null, obs: fv(ov, "s-obs") || null };
     if (isNew) { applyRow("sorties", await must(sb.from("sorties").insert(row).select().single())); toast("Sortie enregistrée."); }
     else { const r = await must(sb.from("sorties").update(row).eq("id", d.id).select()); if (!r.length) return "Modification refusée : vos droits ne le permettent pas."; applyRow("sorties", r[0]); toast("Sortie modifiée."); } });
-  const upd = () => { const eng = fv(ov, "s-engin"), ref = fv(ov, "s-ref"), init = fv(ov, "s-init"), cat = fv(ov, "s-cat"), box = ov.querySelector("#s-info"); if (!ref || !eng) { box.textContent = ""; box.className = "hint full"; return; }
+  const upd = () => { const cat = fv(ov, "s-cat"), cso = cat === "CONSOMMABLE", eng = fv(ov, "s-engin"), ref = fv(ov, "s-ref") || (cso && fv(ov, "s-des") ? consoRef(fv(ov, "s-des")) : ""), init = cso ? "" : fv(ov, "s-init"), box = ov.querySelector("#s-info");
+    if (cso && fv(ov, "s-ref") && !fv(ov, "s-des")) ov.querySelector("#s-des").value = C.info(ref, cat).type || "";
+    if (!ref || (!eng && !cso)) { box.textContent = ""; box.className = "hint full"; return; }
     let se = null; if (init) se = init; else if (C.base.has(KEY(cat, ref, eng))) se = eng; else if (C.base.has(KEY(cat, ref, ""))) se = "";
     const key = se === null ? null : KEY(cat, ref, se), l = key && C.lineMap.get(key), t = C.info(ref, cat).type;
     if (!key || !C.base.has(key)) { box.className = "hint full crit"; box.textContent = "⚠ Aucune entrée en magasin pour cet article" + (init ? " sur le stock de " + init : "") + " : la sortie sera signalée « sans entrée »."; }
     else { box.className = "hint full ok"; const src = se === "" ? "stock commun" : (se === eng ? "propre stock de " + eng : "stock de " + se); box.textContent = (t ? t + " · " : "") + "Pris sur le " + src + " · disponible : " + nb(l ? l.stock : 0); } };
-  ["s-engin", "s-ref", "s-init", "s-cat"].forEach(id => ov.querySelector("#" + id).addEventListener("change", upd)); upd();
+  const sCat = () => { const c = fv(ov, "s-cat") === "CONSOMMABLE"; showF(ov, ["s-init", "s-cpt", "s-int"], !c); showF(ov, ["s-des"], c); setLbl(ov, "s-engin", c ? "Code engin (facultatif)" : "Code engin (monté sur) *"); setLbl(ov, "s-ref", c ? "Référence (facultatif)" : "Référence *"); };
+  ov.querySelector("#s-cat").addEventListener("change", sCat); sCat();
+  ["s-engin", "s-ref", "s-init", "s-cat", "s-des"].forEach(id => ov.querySelector("#" + id).addEventListener("change", upd)); upd();
 }
 
 /* transfert de filtres / PDR vers un autre chantier : sortie de stock sans engin monté (pris sur le stock d'un engin ou le stock commun) */
