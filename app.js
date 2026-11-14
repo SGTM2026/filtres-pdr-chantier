@@ -2075,6 +2075,9 @@ function gplanAutres() { if (!VL.loaded) { if (!VL.loading) vlLoad(); return '<d
     { h: "Vidange à", n: 1, f: v => v.cpt_prevu === null ? "–" : "<b>" + nb(v.cpt_prevu) + " " + esc(v.unite || "h") + "</b>" }, { h: "Cycle vidange", f: v => "<b>" + esc(v.cycle || "–") + "</b>" },
     { h: "État", f: v => '<span class="pill ' + (/retard/i.test(v.etat || "") ? "p-crit" : v.date_prevue <= addJ(today(), 2) ? "p-warn" : "p-acc") + '">' + esc(v.etat || "Prévue") + "</span>" }, { h: "", f: v => gpPdfBtn(v.code, v.cycle_i) }];
   let h = '<div class="more">Période : <b>' + esc(per.txt) + "</b> · " + nb(L.length) + " vidange(s) lancée(s)</div>";
+  const nR = L.filter(v => /retard/i.test(v.etat || "")).length;
+  h += '<div class="kpis">' + kpi("Vidanges à faire", nb(L.length), "acc") + kpi("Prévues sur la période", nb(L.length - nR)) + kpi("En retard à rattraper", nb(nR), nR ? "crit" : "") + "</div>";
+  h += '<div class="kpis">' + Object.entries(GP_AT).map(([k, t]) => { const n = L.filter(v => (v.atelier || "NA") === k).length; return k === "NA" && !n ? "" : kpi(t, nb(n), k === "NA" ? "warn" : "txt"); }).join("") + "</div>";
   for (const k of Object.keys(GP_AT)) { const l = L.filter(v => (v.atelier || "NA") === k); if (!l.length) continue; h += '<div class="panel"><h3>🔧 ' + GP_AT[k] + " <small>" + l.length + " vidange(s)</small></h3>" + table(cols, l, { limit: 1000 }) + "</div>"; }
   if (!L.length) h += '<div class="empty">Aucune vidange lancée sur cette période.</div>';
   return h + '<p class="hint">Vidanges lancées par le Responsable Matériel. Le bouton « Gamme PDF » télécharge la liste des filtres à changer pour le cycle indiqué.</p>'; }
