@@ -112,7 +112,7 @@ function who(id) { if (!id) return '<span class="muted">Import initial</span>'; 
 /* ---------- navigation ---------- */
 const NAV = [
   ["Pilotage", [["dash", "Tableau de bord", true], ["hdash", "Gestion huiles", true], ["journal", "Journal d'activité", true]]],
-  ["Gestion engins", [["gengins", "Gestion engins", true], ["gplan", "Planning vidanges", true]]],
+  ["Gestion engins", [["gengins", "Gestion engins", true], ["gplan", "Planning vidanges"]]],
   ["Magasin", [["stock", "Stock actuel"], ["entrees", "Entrées (BC / BL)"], ["sorties", "Sorties"]]],
   ["Huiles", [["huiles", "Suivi huiles"]]],
   ["Achats", [["da", "Création DA", "da"], ["suivida", "Suivi DA", "da"], ["suivibc", "Suivi BC", "da"]]],
@@ -2061,26 +2061,45 @@ const gpK = f => nh(f || "").replace(/[^a-z0-9]/g, "");
 const GP_FAMK = new Map(Object.entries(GP_FAM).flatMap(([a, L]) => L.map(f => [gpK(f), a])));
 const gpAtFam = x => GP_FAMK.get(gpK(x.fam)) || GP_FAMK.get(gpK((S.inv.get(x.code) || {}).famille)) || "NA";
 const gpAt = x => { const o = S.params.ge_atelier || {}; return GP_AT[o[x.code]] ? o[x.code] : gpAtFam(x); };
+/* vidanges lancées par l'administrateur : visibles par tous les comptes (feuille Planning vidanges) */
+const VL = { loaded: false, loading: null, list: [] };
+const vlLoad = force => { if (VL.loaded && !force) return Promise.resolve(); return VL.loading = fetchAll("vid_lances", "date_prevue").then(r => { VL.list = r; VL.loaded = true; VL.loading = null; if (S.view === "gplan") render(); }).catch(err => { VL.loading = null; VL.loaded = true; toast("Vidanges lancées : " + errMsg(err)); }); };
+const vlKey = (code, d) => code + "|" + d, vlGet = (code, d) => VL.list.find(v => v.code === code && v.date_prevue === d);
+let GP_ROWS = new Map();
+const gpPdfBtn = (code, ci) => '<button type="button" class="btn small" data-act="gp-gpdf" data-id="' + esc(code) + '" data-cyc="' + (ci || 0) + '" title="Télécharger la gamme de vidange de ce cycle (PDF)">Gamme PDF</button>';
+function gplanAutres() { if (!VL.loaded) { if (!VL.loading) vlLoad(); return '<div class="empty">Chargement des vidanges lancées…</div>'; }
+  const per = gpPeriode(), L = VL.list.filter(v => v.date_prevue >= per.d1 && v.date_prevue <= per.d2).sort((a, b) => a.date_prevue.localeCompare(b.date_prevue) || a.code.localeCompare(b.code));
+  const cols = [{ h: "Date prévue", f: v => "<b>" + fD(v.date_prevue) + "</b>" }, { h: "Code", f: v => mono(v.code) }, { h: "Engin", f: v => esc(v.engin || "") || '<span class="muted">–</span>' }, { h: "Catégorie", f: v => esc(v.categorie || "") }, { h: "Type", f: v => esc(v.type || "") },
+    { h: "Dérn Compteur", n: 1, f: v => v.cpt_dern === null ? "–" : nb(v.cpt_dern) + " " + esc(v.unite || "h") + (v.date_dern ? '<br><span class="muted" style="font-size:11px">au ' + fD(v.date_dern) + "</span>" : "") },
+    { h: "Vidange à", n: 1, f: v => v.cpt_prevu === null ? "–" : "<b>" + nb(v.cpt_prevu) + " " + esc(v.unite || "h") + "</b>" }, { h: "Cycle vidange", f: v => "<b>" + esc(v.cycle || "–") + "</b>" },
+    { h: "État", f: v => '<span class="pill ' + (/retard/i.test(v.etat || "") ? "p-crit" : v.date_prevue <= addJ(today(), 2) ? "p-warn" : "p-acc") + '">' + esc(v.etat || "Prévue") + "</span>" }, { h: "", f: v => gpPdfBtn(v.code, v.cycle_i) }];
+  let h = '<div class="more">Période : <b>' + esc(per.txt) + "</b> · " + nb(L.length) + " vidange(s) lancée(s)</div>";
+  for (const k of Object.keys(GP_AT)) { const l = L.filter(v => (v.atelier || "NA") === k); if (!l.length) continue; h += '<div class="panel"><h3>🔧 ' + GP_AT[k] + " <small>" + l.length + " vidange(s)</small></h3>" + table(cols, l, { limit: 1000 }) + "</div>"; }
+  if (!L.length) h += '<div class="empty">Aucune vidange lancée sur cette période.</div>';
+  return h + '<p class="hint">Vidanges lancées par le Responsable Matériel. Le bouton « Gamme PDF » télécharge la liste des filtres à changer pour le cycle indiqué.</p>'; }
 VIEWS.gplan = { title: "Planning vidanges",
   tools() { const t = S.f.gpType || "semaine", b = (k, l) => '<button type="button" class="btn small' + (t === k ? " primary" : "") + '" data-act="gp-type" data-id="' + k + '">' + l + "</button>";
     return '<div class="tools"><div class="chips" style="align-self:flex-end">' + b("jour", "Jour") + b("semaine", "Semaine") + b("mois", "Mois") + "</div>" +
       field("gp-date", t === "mois" ? "Mois" : t === "semaine" ? "Semaine contenant le" : "Jour", t === "mois" ? '<input type="month" id="gp-date" value="' + moisPt(S.f.gpDate || today()) + '">' : '<input type="date" id="gp-date" value="' + (S.f.gpDate || today()) + '">') +
       '<div class="chips" style="align-self:flex-end"><button type="button" class="btn small" data-act="gp-nav" data-id="-1" title="Période précédente">◀</button><button type="button" class="btn small" data-act="gp-nav" data-id="0">Aujourd\'hui</button><button type="button" class="btn small" data-act="gp-nav" data-id="1" title="Période suivante">▶</button></div>' +
-      '<span class="grow"></span><button class="btn" data-act="gp-xls">⬇ Excel</button><button class="btn primary" data-act="gp-pdf">⬇ PDF</button></div>'; },
+      '<span class="grow"></span>' + (S.isAdmin ? '<button class="btn" data-act="gp-xls">⬇ Excel</button><button class="btn primary" data-act="gp-pdf">⬇ PDF</button>' : "") + "</div>"; },
   bind() {
     const e = $("#gp-date"); if (e) e.onchange = () => { if (e.value) { S.f.gpDate = e.type === "month" ? e.value + "-15" : e.value; render(); } }; },
-  body() { if (!S.isAdmin) return '<div class="empty">Réservé aux administrateurs.</div>';
+  body() { if (!S.isAdmin) return gplanAutres();
     if (!GE.loaded) { if (!GE.loading) geLoad(); return '<div class="empty">Chargement des reportings…</div>'; }
+    if (!VL.loaded && !VL.loading) vlLoad();
     if (!GE.mois.length) return '<div class="empty">Aucun reporting importé : ajoutez les reportings dans « Gestion engins ».</div>';
-    const P = gePlanning(), per = gpPeriode(), L = gpListe(P, per), nR = L.filter(x => x.ret).length;
+    const P = gePlanning(), per = gpPeriode(), L = gpListe(P, per), nR = L.filter(x => x.ret).length; GP_ROWS = new Map(L.map(x => [vlKey(x.code, x.dPrev), x]));
     let h = '<div class="more">Période : <b>' + esc(per.txt) + "</b> · " + nb(L.length) + " vidange(s) à faire</div>";
     h += '<div class="kpis">' + kpi("Vidanges à faire", nb(L.length), "acc") + kpi("Prévues sur la période", nb(L.length - nR)) + kpi("En retard à rattraper", nb(nR), nR ? "crit" : "") + kpi("Engins suivis", nb(P.filter(o => o.etat !== "inconnu").length), "txt") + "</div>";
     const cols = [{ h: "Date prévue", f: x => "<b>" + fD(x.dPrev) + "</b>" }, { h: "Code", f: x => '<a href="#" data-act="ge-code-go" data-id="' + esc(x.code) + '">' + mono(x.code) + "</a>" }, { h: "Engin", f: x => esc(gpGam(x)) || '<span class="muted">–</span>' }, { h: "Catégorie", f: x => esc(gpCat(x)) }, { h: "Type", f: x => esc(gpTyp(x)) },
-      { h: "Compteur actuel", n: 1, f: x => x.cpt === null ? "–" : nb(x.cpt) + (x.km ? " km" : " h") + '<br><span class="muted" style="font-size:11px">au ' + fD(x.dRef) + "</span>" + (x.chg ? '<br><span class="pill p-warn">⟲ compteur changé</span>' : "") },
+      { h: "Dérn Compteur", n: 1, f: x => x.cpt === null ? "–" : nb(x.cpt) + (x.km ? " km" : " h") + '<br><span class="muted" style="font-size:11px">au ' + fD(x.dRef) + "</span>" + (x.chg ? '<br><span class="pill p-warn">⟲ compteur changé</span>' : "") },
       { h: "Vidange à", n: 1, f: x => nb(x.cptPrev) + (x.km ? " km" : " h") + (x.k === 1 ? (S.isAdmin ? ' <button type="button" class="btn small" data-act="gp-proch" data-id="' + esc(x.code) + '" title="Modifier le compteur de la prochaine vidange" style="padding:0 6px">✎</button>' : "") + (x.manu ? '<br><span class="pill p-warn" title="Saisie manuelle du ' + fD(x.manu.date) + (x.manu.calc ? " · valeur calculée : " + esc(nb(x.manu.calc)) : "") + '">✎ modifiée</span>' : "") : "") }, { h: "Cycle vidange", f: x => "<b>" + esc(gpCycle(x.code, x.cptPrev, x.km).txt || "–") + "</b>" }, { h: "Rythme", n: 1, f: x => nb(Math.round(x.rate * 10) / 10) + (x.km ? " km" : " h") + "/j" },
       { h: "État", f: x => '<span class="pill ' + (x.ret ? "p-crit" : x.dPrev <= addJ(today(), 7) ? "p-warn" : "p-acc") + '">' + esc(gpEtat(x)) + "</span>" + (x.ret && x.reste <= 0 ? '<br><span class="muted" style="font-size:11px">dépassée de ' + nb(-x.reste) + "</span>" : "") },
       { h: "Atelier", f: x => '<select class="gp-at" data-code="' + esc(x.code) + '" title="Atelier qui fait la vidange (par défaut selon la famille)" style="width:auto;padding:2px 4px;font-size:12px">' + Object.entries(GP_AT).map(([k, t]) => '<option value="' + k + '"' + (gpAt(x) === k ? " selected" : "") + ">" + t + (gpAtFam(x) === k ? " (défaut)" : "") + "</option>").join("") + "</select>" },
-      { h: "", f: x => '<button type="button" class="btn small" data-act="ge-gamme" data-id="' + esc(x.code) + '" data-cyc="' + gpCycle(x.code, x.cptPrev, x.km).ci + '" title="Filtres à préparer pour ce cycle">Gamme</button>' }];
+      { h: "", f: x => { const ci = gpCycle(x.code, x.cptPrev, x.km).ci, v = vlGet(x.code, x.dPrev);
+        return '<div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">' + gpPdfBtn(x.code, ci) + (v ? '<span class="pill p-ok" title="Lancée le ' + fDT(v.lance_at) + ' : visible par les autres comptes">✔ Lancée</span><button type="button" class="btn small" data-act="gp-unl" data-id="' + v.id + '" title="Annuler le lancement">✕</button>'
+          : '<button type="button" class="btn small primary" data-act="gp-lancer" data-id="' + esc(vlKey(x.code, x.dPrev)) + '" title="Lancer la vidange : elle s\'affiche dans le Planning vidanges des autres comptes">Lancer</button>') + "</div>"; } }];
     const bloc = (L, ttl) => { if (per.t === "jour") return '<div class="panel"><h3>' + ttl + " – vidanges du " + fD(per.d1) + " <small>" + L.length + "</small></h3>" + table(cols, L, { empty: "Aucune vidange prévue ce jour.", limit: 500 }) + "</div>";
       { const nR = L.filter(x => x.ret).length; return '<div class="panel"><h3>' + ttl + " <small>" + L.length + " vidange(s)" + (nR ? " · " + nR + " en retard" : "") + "</small></h3>" + table(cols, L, { empty: "Aucune vidange prévue sur la période.", limit: 1000 }) + "</div>"; }
       const days = []; for (let d = per.d1; d <= per.d2; d = addJ(d, 1)) days.push(d); const ret = L.filter(x => x.ret), parJ = days.map(d => [d, L.filter(x => !x.ret && x.dPrev === d)]).filter(([, l]) => l.length);
@@ -2093,7 +2112,7 @@ VIEWS.gplan = { title: "Planning vidanges",
 async function gpExport(kind) { if (!GE.loaded) return toast("Reportings en cours de chargement…");
   const per = gpPeriode(), L0 = gpListe(gePlanning(), per), AK = Object.keys(GP_AT), L = per.t === "mois" ? L0 : L0.map((x, i) => [x, i]).sort((a, b) => AK.indexOf(gpAt(a[0])) - AK.indexOf(gpAt(b[0])) || a[1] - b[1]).map(a => a[0]), u = x => x.km ? " km" : " h", nom = "Planning_vidanges_" + per.t + "_" + per.d1 + (per.d2 !== per.d1 ? "_" + per.d2 : "");
   const rows = L.map(x => [fD(x.dPrev), x.code, gpGam(x), gpCat(x), gpTyp(x), x.cpt === null ? "" : nb(x.cpt) + u(x), nb(x.cptPrev) + u(x), gpCycle(x.code, x.cptPrev, x.km).txt, nb(Math.round(x.rate * 10) / 10) + u(x) + "/j", gpEtat(x), ""]);
-  const head = ["Date prévue", "Code", "Engin", "Catégorie", "Type", "Compteur actuel", "Vidange à", "Cycle vidange", "Rythme", "État", "Réalisée (date / compteur / visa)"];
+  const head = ["Date prévue", "Code", "Engin", "Catégorie", "Type", "Dérn Compteur", "Vidange à", "Cycle vidange", "Rythme", "État", "Réalisée (date / compteur / visa)"];
   if (!L.length) toast("Aucune vidange sur la période : le fichier sera vide.");
   if (kind === "pdf" && per.t === "mois") return gpPdfMois(per, L, nom);
   if (kind === "xls") { await loadScript("vendor/exceljs.min.js"); const wb = new ExcelJS.Workbook(); wb.creator = APPNAME; const ws = wb.addWorksheet("Planning vidanges", { pageSetup: { paperSize: 9, orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
@@ -2169,7 +2188,7 @@ async function gpPdfMois(per, L, nom) {
     doc.setFontSize(14); doc.setTextColor(...NAVY); doc.text(String(s.L.length), bx + bw / 2, by + 13.5, { align: "center" }); bx += bw; }
   doc.setDrawColor(143, 170, 220); doc.setFillColor(...LBLUE); doc.rect(W - M - 110, by, 100, 8, "FD"); doc.rect(W - M - 110, by + 8, 100, 8, "FD");
   doc.setTextColor(...NAVY); doc.setFontSize(11.5); doc.text(sp("TOTAL " + MOIS.split(" ")[0] + (lab ? " – " + lab : "")), W - M - 60, by + 5.7, { align: "center" }); doc.setFontSize(15); doc.text(String(L.length), W - M - 60, by + 14, { align: "center" });
-  const head = [["N°", "Jour", "Date prévue", "Code", "Engin", "Désignation", "Famille", "Marque / Type", "Unité", "Compteur actuel", "Prochaine vidange", "Cycle vidange", "Reste", "Moy. / jour", "Priorité", "Date réalisée", "Compteur réalisé", "Visa / Observations"]];
+  const head = [["N°", "Jour", "Date prévue", "Code", "Engin", "Désignation", "Famille", "Marque / Type", "Unité", "Dérn Compteur", "Prochaine vidange", "Cycle vidange", "Reste", "Moy. / jour", "Priorité", "Date réalisée", "Compteur réalisé", "Visa / Observations"]];
   const body = [], meta = []; let n = 0;
   for (const s of sem) { const [a, b] = clip(s.lu), jA = JOURS_L[(new Date(Date.parse(a)).getUTCDay() + 6) % 7].toLowerCase(), jB = JOURS_L[(new Date(Date.parse(b)).getUTCDay() + 6) % 7].toLowerCase();
     body.push([{ content: sp("SEMAINE " + isoWeek(s.lu) + " – du " + jA + " " + dm(a) + " au " + jB + " " + dm(b) + (s.L.some(x => x.ret) ? " (retards inclus)" : "") + "   ·   " + s.L.length + " vidange(s)"), colSpan: 18 }]); meta.push(null);
@@ -2198,7 +2217,7 @@ function gePlanningHtml(P) {
   const cnt = k => P.filter(o => o.etat === k).length;
   return '<div class="chips" style="margin-bottom:8px">' + Object.entries(GE_PL).map(([k, [t, c]]) => '<button type="button" class="btn small' + (f === k ? " primary" : "") + '" data-act="ge-pl-f" data-id="' + (f === k ? "" : k) + '"><span class="pill ' + c + '">' + nb(cnt(k)) + "</span> " + t + "</button>").join("") + "</div>" +
     table([{ h: "Code", f: o => '<a href="#" data-act="ge-code-go" data-id="' + esc(o.code) + '">' + mono(o.code) + "</a>" }, { h: "Engin", f: o => esc(o.des) }, { h: "Famille", f: o => '<span class="muted">' + esc(o.fam) + "</span>" },
-      { h: "Compteur actuel", n: 1, f: o => o.cpt === null ? "–" : nb(o.cpt) + (o.km ? " km" : " h") + '<br><span class="muted" style="font-size:11px">au ' + fD(o.dRef) + "</span>" + (o.chg ? '<br><span class="pill p-warn" title="Ancien compteur ' + esc(nb(o.chg.avant)) + " → nouveau " + esc(nb(o.chg.apres)) + '">⟲ compteur changé le ' + fD(o.chg.date) + "</span>" : "") },
+      { h: "Dérn Compteur", n: 1, f: o => o.cpt === null ? "–" : nb(o.cpt) + (o.km ? " km" : " h") + '<br><span class="muted" style="font-size:11px">au ' + fD(o.dRef) + "</span>" + (o.chg ? '<br><span class="pill p-warn" title="Ancien compteur ' + esc(nb(o.chg.avant)) + " → nouveau " + esc(nb(o.chg.apres)) + '">⟲ compteur changé le ' + fD(o.chg.date) + "</span>" : "") },
       { h: "Prochaine vidange", n: 1, f: o => (o.proch ? nb(o.proch) : '<span class="muted">–</span>') + (S.isAdmin ? ' <button type="button" class="btn small" data-act="gp-proch" data-id="' + esc(o.code) + '" title="Modifier le compteur de la prochaine vidange" style="padding:0 6px">✎</button>' : "") + (o.manu ? '<br><span class="pill p-warn" title="Saisie manuelle du ' + fD(o.manu.date) + (o.manu.calc ? " · valeur calculée : " + esc(nb(o.manu.calc)) : "") + '">✎ modifiée</span>' : "") }, { h: "Reste", n: 1, f: o => o.reste === undefined ? "–" : (o.reste <= 0 ? '<b class="reste">dépassée de ' + nb(-o.reste) + "</b>" : nb(o.reste)) },
       { h: "Rythme", n: 1, f: o => (o.rate ? nb(Math.round(o.rate * 10) / 10) + (o.km ? " km" : " h") + "/j" : '<span class="muted">0</span>') + (o.chg ? '<br><span class="muted" style="font-size:11px">' + esc(o.rateSrc) + "</span>" : "") },
       { h: "Date prévue", f: o => o.date ? "<b>" + fD(o.date) + "</b>" + (o.jAuj !== null ? '<br><span class="muted" style="font-size:11px">' + (o.jAuj < 0 ? "il y a " + -o.jAuj + " j" : "dans " + o.jAuj + " j") + "</span>" : "") : '<span class="muted">–</span>' },
@@ -2400,6 +2419,12 @@ document.addEventListener("click", async e => { const b = e.target.closest("[dat
           const map = Object.assign({}, S.params.ge_proch || {}), x = ov.querySelector("#gp-pv-x");
           if (x && x.checked) delete map[id]; else { const v = N(fv(ov, "gp-pv")); if (!(v > 0)) return "Saisissez un compteur valide."; if (o.cpt !== null && v < o.cpt - (o.km ? 50000 : 2000)) return "Valeur trop basse par rapport au compteur actuel."; map[id] = { v, date: today() }; }
           const r = await must(sb.from("params").update({ ge_proch: map }).eq("id", 1).select().single()); S.params = Object.assign(S.params, r, { ge_proch: (r && r.ge_proch) || map }); toast("Vidange à enregistrée pour " + id + "."); render(); }, "Enregistrer"); return; }
+    if (a === "gp-lancer") { const x = GP_ROWS.get(id); if (!x) return; const cy = gpCycle(x.code, x.cptPrev, x.km);
+      const row = { code: x.code, date_prevue: x.dPrev, cpt_prevu: x.cptPrev, cycle: cy.txt, cycle_i: cy.ci, atelier: gpAt(x), engin: gpGam(x), categorie: gpCat(x), type: gpTyp(x), famille: x.fam || null, cpt_dern: x.cpt, date_dern: x.dRef || null, unite: x.km ? "km" : "h", etat: gpEtat(x), lance_at: new Date().toISOString() };
+      try { b.disabled = true; await must(sb.from("vid_lances").upsert(row, { onConflict: "code,date_prevue" }).select("id")); await vlLoad(true); toast("Vidange " + x.code + " du " + fD(x.dPrev) + " lancée."); render(); } catch (err) { b.disabled = false; toast("Lancer : " + errMsg(err)); } return; }
+    if (a === "gp-unl") { const v = VL.list.find(v => String(v.id) === id); if (!v) return; return confirmBox("Annuler le lancement de la vidange " + v.code + " du " + fD(v.date_prevue) + " ? Elle ne sera plus visible par les autres comptes.", async () => { await must(sb.from("vid_lances").delete().eq("id", v.id).select("id")); await vlLoad(true); toast("Lancement annulé."); render(); }); }
+    if (a === "gp-gpdf") { try { await loadGammes(); if (!GAMMES) throw new Error("gammes non chargées"); if (!gammeOf(id)) return toast("Aucune gamme de maintenance pour l'engin " + id + ".");
+        const k = [S.f.gmCode, S.f.gmCyc]; S.f.gmCode = id; S.f.gmCyc = +(b.dataset.cyc || 0); try { await gammePdf(); } finally { [S.f.gmCode, S.f.gmCyc] = k; } } catch (err) { toast("Gamme PDF : " + errMsg(err)); } return; }
     if (a === "gp-type") { S.f.gpType = id; return render(true); }
     if (a === "gp-nav") { const t = S.f.gpType || "semaine", d = S.f.gpDate || today(); if (id === "0") S.f.gpDate = today(); else if (t === "mois") { S.f.gpDate = decMois(moisPt(d), +id) + "-15"; } else S.f.gpDate = addJ(d, (t === "jour" ? 1 : 7) * +id); return render(true); }
     if (a === "gp-pdf" || a === "gp-xls") { gpExport(a === "gp-pdf" ? "pdf" : "xls").catch(err => toast("Téléchargement : " + errMsg(err))); return; }
