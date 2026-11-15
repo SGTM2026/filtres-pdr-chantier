@@ -2164,28 +2164,31 @@ async function gpExport(kind) { if (!GE.loaded) return toast("Reportings en cour
   if (!VL.loaded) await vlLoad();
   /* jour / semaine : seulement les vidanges lancées */
   const per = gpPeriode(), L0 = gpListe(gePlanning(), per).filter(x => per.t === "mois" || vlGet(x.code, x.dPrev)), AK = Object.keys(GP_AT), L = per.t === "mois" ? L0 : L0.map((x, i) => [x, i]).sort((a, b) => AK.indexOf(gpAt(a[0])) - AK.indexOf(gpAt(b[0])) || a[1] - b[1]).map(a => a[0]), u = x => x.km ? " km" : " h", nom = "Planning_vidanges_" + per.t + "_" + per.d1 + (per.d2 !== per.d1 ? "_" + per.d2 : "");
-  const rows = L.map(x => [fD(x.dPrev), x.code, gpGam(x), gpCat(x), gpTyp(x), x.cpt === null ? "" : nb(x.cpt) + u(x), nb(x.cptPrev) + u(x), gpCycle(x.code, x.cptPrev, x.km).txt, nb(Math.round(x.rate * 10) / 10) + u(x) + "/j", gpEtat(x), ""]);
-  const head = ["Date prévue", "Code", "Engin", "Catégorie", "Type", "Dérn Compteur", "Vidange à", "Cycle vidange", "Rythme", "État", "Réalisée (date / compteur / visa)"];
+  const rows = L.map(x => [fD(x.dPrev), x.code, gpGam(x), gpCat(x), gpTyp(x), x.cpt === null ? "" : nb(x.cpt) + u(x), nb(x.cptPrev) + u(x), gpCycle(x.code, x.cptPrev, x.km).txt, ""]);
+  const head = ["Date prévue", "Code", "Engin", "Catégorie", "Type", "Dérn Compteur", "Vidange à", "Cycle vidange", "Réalisée (date / compteur / visa)"];
   if (!L.length) toast(per.t === "mois" ? "Aucune vidange sur la période : le fichier sera vide." : "Aucune vidange lancée sur la période : le fichier sera vide (cliquez « Lancer » sur les vidanges à faire).");
   if (kind === "pdf" && per.t === "mois") return gpPdfMois(per, L, nom);
   if (kind === "xls") { await loadScript("vendor/exceljs.min.js"); const wb = new ExcelJS.Workbook(); wb.creator = APPNAME; const ws = wb.addWorksheet("Planning vidanges", { pageSetup: { paperSize: 9, orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
-    ws.columns = [12, 10, 26, 22, 18, 16, 14, 13, 12, 24, 30].map(w => ({ width: w })); const thin = { style: "thin" }, bd = { top: thin, left: thin, bottom: thin, right: thin };
+    ws.columns = [12, 10, 26, 22, 18, 16, 14, 13, 34].map(w => ({ width: w })); const thin = { style: "thin" }, bd = { top: thin, left: thin, bottom: thin, right: thin };
     ws.addRow(["PLANNING DES VIDANGES – " + per.txt]).font = { bold: true, size: 13 }; ws.addRow([(S.params.nom_chantier || "") + " · édité le " + fD(today())]).font = { size: 9, color: { argb: "FF666666" } }; ws.addRow([]);
-    const hr = ws.addRow(head); hr.eachCell(c => { c.font = { bold: true, color: { argb: "FFFFFFFF" } }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0F4C5C" } }; c.border = bd; c.alignment = { horizontal: "center", vertical: "middle", wrapText: true }; });
-    L.forEach((x, i) => { if (per.t !== "mois" && (i === 0 || gpAt(L[i - 1]) !== gpAt(x))) { const k = gpAt(x), g = ws.addRow([GP_AT[k].toUpperCase() + " – " + L.filter(y => gpAt(y) === k).length + " vidange(s)"]); ws.mergeCells(g.number, 1, g.number, head.length);
-        g.getCell(1).font = { bold: true, color: { argb: "FFFFFFFF" } }; g.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F3864" } }; g.height = 18; }
-      const r = ws.addRow(rows[i]); r.eachCell({ includeEmpty: true }, c => { c.border = bd; c.alignment = { vertical: "middle", wrapText: true }; }); r.getCell(8).font = { bold: true }; if (x.ret) r.getCell(10).font = { bold: true, color: { argb: "FFB42318" } }; });
-    ws.views = [{ state: "frozen", ySplit: 4 }]; saveBlob(new Blob([await wb.xlsx.writeBuffer()], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), nom + ".xlsx"); return; }
+    const hdr = () => { const hr = ws.addRow(head); hr.eachCell(c => { c.font = { bold: true, color: { argb: "FFFFFFFF" } }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0F4C5C" } }; c.border = bd; c.alignment = { horizontal: "center", vertical: "middle", wrapText: true }; }); };
+    if (!L.length) hdr();
+    L.forEach((x, i) => { if (i === 0 || gpAt(L[i - 1]) !== gpAt(x)) { if (i) ws.addRow([]); const k = gpAt(x), g = ws.addRow([GP_AT[k].toUpperCase() + " – " + L.filter(y => gpAt(y) === k).length + " vidange(s)"]); ws.mergeCells(g.number, 1, g.number, head.length);
+        g.getCell(1).font = { bold: true, color: { argb: "FFFFFFFF" } }; g.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F3864" } }; g.height = 18; hdr(); }
+      const r = ws.addRow(rows[i]); r.eachCell({ includeEmpty: true }, c => { c.border = bd; c.alignment = { vertical: "middle", wrapText: true }; }); r.getCell(7).font = r.getCell(8).font = { bold: true }; if (x.ret) r.getCell(1).font = { bold: true, color: { argb: "FFB42318" } }; }); saveBlob(new Blob([await wb.xlsx.writeBuffer()], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), nom + ".xlsx"); return; }
   await loadScript("vendor/jspdf.umd.min.js"); await loadScript("vendor/jspdf.plugin.autotable.min.js");
   const { jsPDF } = window.jspdf, doc = new jsPDF({ unit: "mm", format: "a4", orientation: "landscape" }), W = 297, sp = v => String(v).replace(/[\u00a0\u202f]/g, " ");
   doc.setFillColor(15, 76, 92); doc.rect(0, 0, W, 22, "F"); doc.setTextColor(255); doc.setFont("helvetica", "bold"); doc.setFontSize(15); doc.text("PLANNING DES VIDANGES", 14, 10);
   doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.text(sp(S.params.nom_chantier || ""), 14, 17); doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.text(sp(per.txt), W - 14, 10, { align: "right" });
   doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.text(sp(L.length + " vidange(s) · " + L.filter(x => x.ret).length + " en retard · édité le " + fD(today())), W - 14, 17, { align: "right" });
-  const body = [], idx = []; L.forEach((x, i) => { if (per.t !== "mois" && (i === 0 || gpAt(L[i - 1]) !== gpAt(x))) { const k = gpAt(x); body.push([{ content: sp(GP_AT[k].toUpperCase() + " – " + L.filter(y => gpAt(y) === k).length + " vidange(s)"), colSpan: head.length }]); idx.push(-1); } body.push(rows[i].map(sp)); idx.push(i); });
-  doc.autoTable({ startY: 27, head: [head], body, theme: "grid", styles: { fontSize: 8, cellPadding: 1.6, valign: "middle" }, headStyles: { fillColor: [15, 76, 92], textColor: 255, fontStyle: "bold" },
-    columnStyles: { 0: { cellWidth: 19 }, 1: { cellWidth: 14, fontStyle: "bold" }, 5: { halign: "right" }, 6: { halign: "right", fontStyle: "bold" }, 7: { halign: "center", fontStyle: "bold" }, 8: { halign: "right" }, 10: { cellWidth: 38 } }, margin: { left: 10, right: 10 },
-    didParseCell: d => { if (d.section === "body" && idx[d.row.index] === -1) { d.cell.styles.fillColor = [31, 56, 100]; d.cell.styles.textColor = 255; d.cell.styles.fontStyle = "bold"; d.cell.styles.fontSize = 9.5; return; }
-      if (d.section === "body" && d.column.index === 9 && L[idx[d.row.index]] && L[idx[d.row.index]].ret) { d.cell.styles.textColor = [180, 35, 24]; d.cell.styles.fontStyle = "bold"; } },
+  /* un bandeau par atelier, suivi de la ligne des noms de colonnes */
+  const body = [], idx = []; L.forEach((x, i) => { if (i === 0 || gpAt(L[i - 1]) !== gpAt(x)) { const k = gpAt(x); body.push([{ content: sp(GP_AT[k].toUpperCase() + " – " + L.filter(y => gpAt(y) === k).length + " vidange(s)"), colSpan: head.length }]); idx.push(-1); body.push(head.slice()); idx.push(-2); } body.push(rows[i].map(sp)); idx.push(i); });
+  if (!L.length) { body.push(head.slice()); idx.push(-2); }
+  doc.autoTable({ startY: 27, body, theme: "grid", showHead: "never", styles: { fontSize: 8, cellPadding: 1.6, valign: "middle" }, headStyles: { fillColor: [15, 76, 92], textColor: 255, fontStyle: "bold" },
+    columnStyles: { 0: { cellWidth: 21 }, 1: { cellWidth: 15, fontStyle: "bold" }, 5: { halign: "right" }, 6: { halign: "right", fontStyle: "bold" }, 7: { halign: "center", fontStyle: "bold" }, 8: { cellWidth: 55 } }, margin: { left: 10, right: 10 },
+    didParseCell: d => { const t = idx[d.row.index]; if (t === -1) { d.cell.styles.fillColor = [31, 56, 100]; d.cell.styles.textColor = 255; d.cell.styles.fontStyle = "bold"; d.cell.styles.fontSize = 9.5; return; }
+      if (t === -2) { d.cell.styles.fillColor = [15, 76, 92]; d.cell.styles.textColor = 255; d.cell.styles.fontStyle = "bold"; d.cell.styles.halign = "center"; return; }
+      if (d.column.index === 0 && L[t] && L[t].ret) { d.cell.styles.textColor = [180, 35, 24]; d.cell.styles.fontStyle = "bold"; } },
     didDrawPage: () => { doc.setFontSize(7.5); doc.setTextColor(120); doc.text("Page " + doc.getNumberOfPages(), W - 14, 205, { align: "right" }); } });
   doc.save(nom + ".pdf"); }
 /* ---------- rapport mensuel PDF (A3 paysage) : calendrier du mois + planning détaillé par semaine ---------- */
