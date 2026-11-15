@@ -2161,10 +2161,12 @@ VIEWS.gplan = { title: "Planning vidanges",
     h += '<div class="panel"><h3>Planning complet des engins</h3>' + gePlanningHtml(P) + "</div>";
     return h + '<p class="hint">Date prévue calculée à partir du compteur actuel, de la prochaine vidange et du rythme d\'utilisation de chaque engin (voir explication sous le planning complet). Sur une semaine ou un mois, un engin très utilisé peut avoir plusieurs vidanges (tous les « intervalle ÷ rythme » jours). Les engins en retard figurent dans « à rattraper ».</p>'; } };
 async function gpExport(kind) { if (!GE.loaded) return toast("Reportings en cours de chargement…");
-  const per = gpPeriode(), L0 = gpListe(gePlanning(), per), AK = Object.keys(GP_AT), L = per.t === "mois" ? L0 : L0.map((x, i) => [x, i]).sort((a, b) => AK.indexOf(gpAt(a[0])) - AK.indexOf(gpAt(b[0])) || a[1] - b[1]).map(a => a[0]), u = x => x.km ? " km" : " h", nom = "Planning_vidanges_" + per.t + "_" + per.d1 + (per.d2 !== per.d1 ? "_" + per.d2 : "");
+  if (!VL.loaded) await vlLoad();
+  /* jour / semaine : seulement les vidanges lancées */
+  const per = gpPeriode(), L0 = gpListe(gePlanning(), per).filter(x => per.t === "mois" || vlGet(x.code, x.dPrev)), AK = Object.keys(GP_AT), L = per.t === "mois" ? L0 : L0.map((x, i) => [x, i]).sort((a, b) => AK.indexOf(gpAt(a[0])) - AK.indexOf(gpAt(b[0])) || a[1] - b[1]).map(a => a[0]), u = x => x.km ? " km" : " h", nom = "Planning_vidanges_" + per.t + "_" + per.d1 + (per.d2 !== per.d1 ? "_" + per.d2 : "");
   const rows = L.map(x => [fD(x.dPrev), x.code, gpGam(x), gpCat(x), gpTyp(x), x.cpt === null ? "" : nb(x.cpt) + u(x), nb(x.cptPrev) + u(x), gpCycle(x.code, x.cptPrev, x.km).txt, nb(Math.round(x.rate * 10) / 10) + u(x) + "/j", gpEtat(x), ""]);
   const head = ["Date prévue", "Code", "Engin", "Catégorie", "Type", "Dérn Compteur", "Vidange à", "Cycle vidange", "Rythme", "État", "Réalisée (date / compteur / visa)"];
-  if (!L.length) toast("Aucune vidange sur la période : le fichier sera vide.");
+  if (!L.length) toast(per.t === "mois" ? "Aucune vidange sur la période : le fichier sera vide." : "Aucune vidange lancée sur la période : le fichier sera vide (cliquez « Lancer » sur les vidanges à faire).");
   if (kind === "pdf" && per.t === "mois") return gpPdfMois(per, L, nom);
   if (kind === "xls") { await loadScript("vendor/exceljs.min.js"); const wb = new ExcelJS.Workbook(); wb.creator = APPNAME; const ws = wb.addWorksheet("Planning vidanges", { pageSetup: { paperSize: 9, orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
     ws.columns = [12, 10, 26, 22, 18, 16, 14, 13, 12, 24, 30].map(w => ({ width: w })); const thin = { style: "thin" }, bd = { top: thin, left: thin, bottom: thin, right: thin };
