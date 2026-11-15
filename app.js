@@ -2080,7 +2080,7 @@ function gpPeriode() { const t = S.f.gpType || "semaine", d = S.f.gpDate || toda
 /* occurrences de vidange dans la période : 1re = date prévue (ou aujourd'hui si en retard), puis tous les « intervalle ÷ rythme » jours */
 function gpListe(P, per) { const out = [], auj = today();
   for (const o of P) { if (o.etat === "inconnu" || o.etat === "arret") continue;
-    const enRet = o.etat === "retard"; let d = enRet ? auj : o.date, cpt = o.proch, k = 1; if (!d) continue;
+    /* période future : une vidange prévue aujourd'hui ou avant, pas encore faite, passe « à rattraper » */ const enRet = o.etat === "retard" || (per.d1 > auj && o.date && o.date <= auj); let d = enRet ? auj : o.date, cpt = o.proch, k = 1; if (!d) continue;
     const pas = o.intv && o.rate > 0 ? Math.max(1, Math.round(o.intv / o.rate)) : null;
     if (enRet && per.d2 >= auj && per.d1 <= auj) out.push({ ...o, dPrev: d, cptPrev: cpt, k, ret: true });
     else if (!enRet && d >= per.d1 && d <= per.d2) out.push({ ...o, dPrev: d, cptPrev: cpt, k, ret: false });
