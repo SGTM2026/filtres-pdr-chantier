@@ -1895,6 +1895,23 @@ function gePtParse(aoa, dDef) {
     for (const p of pairs) { const c = xlCpt(r[p.c]), e = String(r[p.e] ?? "").trim().toUpperCase(); if (c === null && !e) continue; const d = p.d || dDef; if (!d) { sansDate++; continue; }
       if (S.inv.size && !S.inv.has(code)) inconnus.add(code); out.push({ code, date: d, compteur: c, etat: PT_ETATS.includes(e) ? e : (e || null) }); } }
   return { rows: out, dates: [...new Set(out.map(x => x.date))].sort(), pairs, sansDate, inconnus: [...inconnus], blocsSansDate: pairs.filter(p => !p.d).length }; }
+/* mois « virtuels » : mois de pointage (26 → 25) sans reporting importé, reconstruits à partir des compteurs et états saisis.
+   Ils s'ajoutent aux reportings dans les filtres Du mois / Au mois, la fiche engin (pointage jour par jour, mois par mois) et les tableaux de bord ; le planning des vidanges n'utilise que les reportings + compteurs. */
+let GE_V = { k: "", m: [], e: [] };
+function geVirt() { const k = GE.pt.length + "|" + GE.eng.length + "|" + GE.mois.length + "|" + (GE.pt[GE.pt.length - 1] || {}).id; if (GE_V.k === k) return GE_V;
+  const reels = new Set(GE.mois.map(x => x.mois.slice(0, 7))), keys = [...new Set(GE.pt.map(t => moisPt(t.date)))].filter(x => !reels.has(x)).sort(), m = [], e = [];
+  for (const key of keys) { const P = perMois(key), mois = key + "-01", pts = GE.pt.filter(t => t.date >= P.d1 && t.date <= P.d2); if (!pts.length) continue;
+    m.push({ id: "v" + key, mois, debut: P.d1, fin: P.d2, virt: true });
+    const nj = Math.round((Date.parse(P.d2) - Date.parse(P.d1)) / 864e5) + 1, prev = decMois(key, -1);
+    for (const code of [...new Set(pts.map(t => t.code))]) { const by = new Map(pts.filter(t => t.code === code).map(t => [t.date, t]));
+      const et = Array.from({ length: nj }, (_, i) => { const t = by.get(addJ(P.d1, i)); return { d: addJ(P.d1, i), e: t && t.etat ? String(t.etat).toUpperCase() : "", c: t && N(t.compteur) > 0 ? N(t.compteur) : null }; });
+      const K = geCounter(et), n = x => et.filter(o => o.e === x).length, r0 = GE.eng.filter(r => r.code === code).sort((a, b) => b.mois.localeCompare(a.mois))[0] || {}, rp = GE.eng.find(r => r.code === code && r.mois.slice(0, 7) === prev), inv = S.inv.get(code) || {};
+      const first = K.vals.length ? K.vals[0] : null, gap = rp && N(rp.cpt_fin) > 0 && first !== null && !K.changes.length && first >= N(rp.cpt_fin) && first - N(rp.cpt_fin) < (geUnite(code) === "km" ? 5000 : 300) ? first - N(rp.cpt_fin) : 0;
+      e.push({ id: "v" + key + code, virt: true, mois, code, designation: r0.designation || inv.gamme || null, famille: r0.famille || inv.famille || "Autre", categorie: r0.categorie || inv.categorie || null, marque: r0.marque || inv.marque || null, type: r0.type || inv.type || null, serie: r0.serie || null,
+        date_entree: null, date_sortie: null, j_panne: n("P"), j_af: n("AF"), j_anf: n("ANF"), j_m: n("M"), j_tr: n("TR"), j_factures: n("M") + n("AF"), hm: Math.max(0, (K.hm || 0) + gap), unite: geUnite(code),
+        cpt_debut: rp && N(rp.cpt_fin) > 0 ? N(rp.cpt_fin) : first, cpt_fin: K.vals.length ? K.vals[K.vals.length - 1] : null, cpt_changes: K.changes.length ? K.changes : null, proch_vidange: null, der_vidange: null, date_vidange: null, etats: et.map(o => [o.e, o.c]) }); } }
+  return GE_V = { k, m, e }; }
+const GM = () => GE.mois.concat(geVirt().m), GEN = () => GE.eng.concat(geVirt().e), geIsVirt = mm => geVirt().m.some(x => x.mois === mm);
 /* compteurs d'un mois de pointage (26 → 25) à partir des compteurs saisis (Saisie compteur), avant le reporting */
 function gePtMois() { const list = [...new Set(GE.pt.map(t => moisPt(t.date)))].sort().reverse(); if (!list.length) return { list, rows: [] };
   const key = list.includes(S.f.gePtM) ? S.f.gePtM : list[0], P = perMois(key), fin = P.d2 < today() ? P.d2 : today(), prev = decMois(key, -1);
@@ -1973,7 +1990,7 @@ function gePtForm() {
     const d = b.dataset.ptdel; confirmBox("Supprimer le pointage du " + fD(d) + " (" + GE.pt.filter(t => t.date === d).length + " engin(s)) ?", async () => { await must(sb.from("cpt_pointage").delete().eq("date", d).select("id")); await geLoad(true); ov.remove(); toast("Pointage du " + fD(d) + " supprimé."); gePtForm(); }); });
 }
 /* --------- calculs --------- */
-const geSel = () => { const L = GE.mois.map(x => x.mois).sort(); if (!L.length) return []; let f = S.f.geFrom, t = S.f.geTo; if (!L.includes(t)) t = L[L.length - 1]; if (!L.includes(f)) f = t; if (f > t) [f, t] = [t, f]; return L.filter(m => m >= f && m <= t); };
+const geSel = () => { const L = GM().map(x => x.mois).sort(); if (!L.length) return []; let f = S.f.geFrom, t = S.f.geTo; if (!L.includes(t)) t = L[L.length - 1]; if (!L.includes(f)) f = t; if (f > t) [f, t] = [t, f]; return L.filter(m => m >= f && m <= t); };
 const geKm = r => r.unite === "km";
 function geAgg(rows, pannes) { const s = (k, R) => (R || rows).reduce((t, r) => t + N(r[k]), 0), M = s("j_m"), AF = s("j_af"), ANF = s("j_anf"), P = s("j_panne"), base = M + AF + ANF + P, np = pannes.length;
   const kmCodes = new Set(rows.filter(geKm).map(r => r.code)), hm = s("hm", rows.filter(r => !geKm(r))), km = s("hm", rows.filter(geKm)), npK = pannes.filter(p => kmCodes.has(p.code)).length, npH = np - npK;
@@ -1982,15 +1999,15 @@ function geAgg(rows, pannes) { const s = (k, R) => (R || rows).reduce((t, r) => 
 const geMtbf = a => a.mtbf ? nb(Math.round(a.mtbf)) + " h" : (a.mtbfKm ? nb(Math.round(a.mtbfKm)) + " km" : "–");
 /* pannes distinctes (une panne à cheval sur deux mois n'est comptée qu'une fois) */
 function gePannes(moisL, code) { const seen = new Map(); for (const p of GE.pan) { if (!moisL.includes(p.mois) || (code && p.code !== code)) continue; const k = p.code + "|" + (p.debut || p.description); const o = seen.get(k); if (!o || p.mois > o.mois) seen.set(k, p); } return [...seen.values()]; }
-function geVidanges(moisL, code) { const per = moisL.map(m => GE.mois.find(x => x.mois === m)).filter(Boolean), d1 = per.map(x => x.debut).sort()[0], d2 = per.map(x => x.fin).sort().slice(-1)[0], out = new Map();
+function geVidanges(moisL, code) { const per = moisL.map(m => GM().find(x => x.mois === m)).filter(Boolean), d1 = per.map(x => x.debut).sort()[0], d2 = per.map(x => x.fin).sort().slice(-1)[0], out = new Map();
   for (const c of S.hCon.values()) if (c.entretien === "Vidange" && inPeriod(c.date, d1, d2) && (!code || c.engin === code)) out.set(c.engin + "|" + c.date, { code: c.engin, date: c.date, src: "Suivi huiles", huile: c.huile, qte: c.qte, cpt: c.compteur });
-  for (const r of GE.eng) if (moisL.includes(r.mois) && r.date_vidange && inPeriod(r.date_vidange, d1, d2) && (!code || r.code === code)) { const k = r.code + "|" + r.date_vidange; if (!out.has(k)) out.set(k, { code: r.code, date: r.date_vidange, src: "Reporting", cpt: r.der_vidange }); }
+  for (const r of GEN()) if (moisL.includes(r.mois) && r.date_vidange && inPeriod(r.date_vidange, d1, d2) && (!code || r.code === code)) { const k = r.code + "|" + r.date_vidange; if (!out.has(k)) out.set(k, { code: r.code, date: r.date_vidange, src: "Reporting", cpt: r.der_vidange }); }
   return { list: [...out.values()].sort((a, b) => (b.date || "").localeCompare(a.date || "")), d1, d2 }; }
 const pct = v => v === null || v === undefined ? "–" : (Math.round(v * 1000) / 10).toLocaleString("fr-FR") + " %";
 const geStack = a => { const b = a.base || 1; return '<span class="gstack" title="Marche ' + a.M + " j · AF " + a.AF + " j · ANF " + a.ANF + " j · Panne " + a.P + ' j">' + [["M", a.M], ["AF", a.AF], ["ANF", a.ANF], ["P", a.P]].map(([k, v]) => v ? '<i style="width:' + (v / b * 100).toFixed(2) + "%;background:" + GE_ETATS[k][1] + '"></i>' : "").join("") + "</span>"; };
 const geLegend = () => '<div class="glegend">' + Object.entries(GE_ETATS).map(([k, [t, c]]) => '<span><i style="background:' + c + '"></i>' + k + " = " + t + "</span>").join("") + "</div>";
 /* courbe d'évolution mensuelle (SVG) */
-function geTrend(moisL) { if (moisL.length < 2) return ""; const W = 640, H = 210, L = 42, Rr = 12, T = 14, B = 30, pts = moisL.map(m => { const rows = GE.eng.filter(r => r.mois === m); return geAgg(rows, []); });
+function geTrend(moisL) { if (moisL.length < 2) return ""; const W = 640, H = 210, L = 42, Rr = 12, T = 14, B = 30, pts = moisL.map(m => { const rows = GEN().filter(r => r.mois === m); return geAgg(rows, []); });
   const x = i => L + i * (W - L - Rr) / (moisL.length - 1), y = v => T + (1 - v) * (H - T - B), ser = [["dispo", "Disponibilité", "var(--ok)"], ["expl", "Exploitation", "var(--petrol)"], ["panne", "Panne", "var(--crit)"]];
   let s = '<svg viewBox="0 0 ' + W + " " + H + '" class="gtrend" role="img" aria-label="Évolution mensuelle des taux">';
   [0, .25, .5, .75, 1].forEach(v => { s += '<line x1="' + L + '" x2="' + (W - Rr) + '" y1="' + y(v) + '" y2="' + y(v) + '" class="grid"/><text x="' + (L - 6) + '" y="' + (y(v) + 4) + '" text-anchor="end">' + v * 100 + "%</text>"; });
@@ -1999,7 +2016,7 @@ function geTrend(moisL) { if (moisL.length < 2) return ""; const W = 640, H = 21
   return s + '</svg><div class="glegend">' + ser.map(([, t, c]) => '<span><i style="background:' + c + '"></i>' + t + "</span>").join("") + "</div>"; }
 /* --------- vue --------- */
 VIEWS.gengins = { title: "Gestion engins",
-  tools() { const L = GE.mois.map(x => x.mois).sort(), sel = geSel(), o = v => L.map(m => '<option value="' + m + '"' + (m === v ? " selected" : "") + ">" + esc(moisTxt(m)) + "</option>").join("");
+  tools() { const L = GM().map(x => x.mois).sort(), sel = geSel(), o = v => L.map(m => '<option value="' + m + '"' + (m === v ? " selected" : "") + ">" + esc(moisTxt(m)) + (geIsVirt(m) ? " (pointage)" : "") + "</option>").join("");
     return '<div class="tools">' + (L.length ? field("ge-from", "Du mois", '<select id="ge-from">' + o(sel[0]) + "</select>") + field("ge-to", "Au mois", '<select id="ge-to">' + o(sel[sel.length - 1]) + "</select>") +
       '<button class="btn small" data-act="ge-cumul" style="align-self:flex-end" title="Tous les mois importés">Cumul (tous les mois)</button>' : "") +
       '<span class="grow"></span><button class="btn" data-act="ge-pt">⏱ Saisie compteur</button><button class="btn" data-act="ge-list">Reportings importés (' + L.length + ")</button><button class=\"btn primary\" data-act=\"ge-add\">+ Ajouter reporting</button></div>"; },
@@ -2007,10 +2024,10 @@ VIEWS.gengins = { title: "Gestion engins",
     const c = $("#ge-code"); if (c) c.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); S.f.geCode = c.value.trim().split(/\s+[–-]\s+/)[0]; render(); } }); },
   body() { if (!S.isAdmin) return '<div class="empty">Réservé aux administrateurs.</div>';
     if (!GE.loaded) { if (!GE.loading) geLoad(); return '<div class="empty">Chargement des reportings…</div>'; }
-    if (!GE.mois.length) return '<div class="empty">Aucun reporting importé.<br>Cliquez « + Ajouter reporting » et choisissez le fichier CANEVAS POINTAGE du mois.</div>';
-    const ml = geSel(), per = ml.map(m => GE.mois.find(x => x.mois === m)), d1 = per[0].debut, d2 = per[per.length - 1].fin, rows = GE.eng.filter(r => ml.includes(r.mois)), pans = gePannes(ml), A = geAgg(rows, pans), V = geVidanges(ml);
+    if (!GM().length) return '<div class="empty">Aucun reporting importé.<br>Cliquez « + Ajouter reporting » et choisissez le fichier CANEVAS POINTAGE du mois.</div>';
+    const ml = geSel(), per = ml.map(m => GM().find(x => x.mois === m)), d1 = per[0].debut, d2 = per[per.length - 1].fin, rows = GEN().filter(r => ml.includes(r.mois)), pans = gePannes(ml), A = geAgg(rows, pans), V = geVidanges(ml);
     const codes = new Set(rows.map(r => r.code));
-    let h = '<div class="more">Période : <b>' + (ml.length > 1 ? moisTxt(ml[0]) + " → " + moisTxt(ml[ml.length - 1]) + " (cumul de " + ml.length + " mois)" : moisTxt(ml[0])) + "</b> · du " + fD(d1) + " au " + fD(d2) + " · " + codes.size + " engins</div>";
+    let h = '<div class="more">Période : <b>' + (ml.length > 1 ? moisTxt(ml[0]) + " → " + moisTxt(ml[ml.length - 1]) + " (cumul de " + ml.length + " mois)" : moisTxt(ml[0])) + "</b> · du " + fD(d1) + " au " + fD(d2) + " · " + codes.size + " engins" + (ml.some(geIsVirt) ? ' · <span class="pill p-warn" title="Pas encore de reporting : calcul d\'après les compteurs et états saisis (Saisie compteur), jours non pointés exclus">' + ml.filter(geIsVirt).map(moisTxt).join(", ") + " : d'après les pointages saisis</span>" : "") + "</div>";
     h += '<div class="kpis">' + kpi("Taux de disponibilité", pct(A.dispo), A.dispo !== null && A.dispo < .85 ? "warn" : "") + kpi("Taux d'exploitation", pct(A.expl), "acc") + kpi("Taux de panne", pct(A.panne), A.panne > .1 ? "crit" : "") +
       kpi("MTBF (engins à heures)", A.mtbf ? nb(Math.round(A.mtbf)) + " h" : "–", "txt") + kpi("MTTR", A.mttr === null ? "–" : nb(Math.round(A.mttr * 10) / 10) + " j", "txt") + kpi("Pannes déclarées", nb(A.np), A.np ? "crit" : "") +
       kpi("Heures de marche", nb(Math.round(A.hm)) + " h", "txt") + (A.km ? kpi("Km parcourus (véhicules)", nb(Math.round(A.km)) + " km", "txt") : "") + kpi("Vidanges réalisées", nb(V.list.length)) + "</div>";
@@ -2020,7 +2037,7 @@ VIEWS.gengins = { title: "Gestion engins",
     if (nRet || n7) h += '<div class="banner crit">🛢 ' + (nRet ? "<b>" + nRet + "</b> vidange(s) en retard" : "") + (nRet && n7 ? " · " : "") + (n7 ? "<b>" + n7 + "</b> à faire dans les 7 jours" : "") + ' — <a href="#" data-act="ge-sec-open" data-id="plan">voir le planning</a></div>';
     /* code engin */
     h += '<div class="panel"><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><h3 style="margin:0">Recherche par code engin</h3><span class="grow"></span><input id="ge-code" list="dl-ge-codes" value="' + esc(S.f.geCode || "") + '" placeholder="Code engin puis Entrée" autocomplete="off" style="width:auto;min-width:240px"><datalist id="dl-ge-codes">' +
-      [...new Set(GE.eng.map(r => r.code))].sort().map(c => '<option value="' + esc(c) + '">' + esc((GE.eng.find(r => r.code === c) || {}).designation || "") + "</option>").join("") + '</datalist><button class="btn primary small" data-act="ge-code">Rechercher</button>' + (S.f.geCode ? '<button class="btn small" data-act="ge-code-x">Fermer la fiche</button>' : "") + "</div>" + (S.f.geCode ? geFiche(S.f.geCode, ml) : "") + "</div>";
+      [...new Set(GEN().map(r => r.code))].sort().map(c => '<option value="' + esc(c) + '">' + esc((GEN().find(r => r.code === c) || {}).designation || "") + "</option>").join("") + '</datalist><button class="btn primary small" data-act="ge-code">Rechercher</button>' + (S.f.geCode ? '<button class="btn small" data-act="ge-code-x">Fermer la fiche</button>' : "") + "</div>" + (S.f.geCode ? geFiche(S.f.geCode, ml) : "") + "</div>";
     /* familles */
     const fams = [...new Set(rows.map(r => r.famille || "Autre"))].map(f => { const R = rows.filter(r => (r.famille || "Autre") === f), cs = new Set(R.map(r => r.code)); const a = geAgg(R, pans.filter(p => cs.has(p.code))); a.fam = f; a.n = cs.size; a.vid = V.list.filter(v => cs.has(v.code)).length; return a; }).sort((a, b) => b.n - a.n || a.fam.localeCompare(b.fam));
     /* recherche par famille */
@@ -2042,10 +2059,10 @@ VIEWS.gengins = { title: "Gestion engins",
       ["imm", "Engins les plus immobilisés", "jours de panne · top 10", () => { const topP = [...codes].map(c => { const R = rows.filter(r => r.code === c); return { c, v: R.reduce((t, r) => t + N(r.j_panne), 0), d: (R[0] || {}).designation }; }).filter(x => x.v > 0).sort((a, b) => b.v - a.v).slice(0, 10);
         return hBars(topP.map(x => ({ label: x.c, labelHtml: mono(x.c) + ' <span class="muted">' + esc(x.d || "") + "</span>", v: x.v })), { fmt: v => nb(v) + " j", empty: "Aucune panne sur la période." }); }],
       ["vfam", "Vidanges réalisées par famille", "", () => hBars(fams.filter(a => a.vid).map(a => ({ label: a.fam, labelHtml: esc(a.fam), v: a.vid })), { fmt: v => nb(v), empty: "Aucune vidange sur la période." })],
-      ["vmois", "Vidanges réalisées par mois", "total " + nb(V.list.length), () => hBars(ml.map(m => { const p = GE.mois.find(x => x.mois === m); return { label: m, labelHtml: esc(moisTxt(m)), v: V.list.filter(v => inPeriod(v.date, p.debut, p.fin)).length }; }), { fmt: v => nb(v), empty: "Aucune vidange." })],
-      ["vlist", "Liste des vidanges réalisées", nb(V.list.length), () => table([{ h: "Date", f: v => fD(v.date) }, { h: "Code", f: v => mono(v.code) }, { h: "Engin", f: v => esc((GE.eng.find(r => r.code === v.code) || {}).designation || "") },
+      ["vmois", "Vidanges réalisées par mois", "total " + nb(V.list.length), () => hBars(ml.map(m => { const p = GM().find(x => x.mois === m); return { label: m, labelHtml: esc(moisTxt(m)), v: V.list.filter(v => inPeriod(v.date, p.debut, p.fin)).length }; }), { fmt: v => nb(v), empty: "Aucune vidange." })],
+      ["vlist", "Liste des vidanges réalisées", nb(V.list.length), () => table([{ h: "Date", f: v => fD(v.date) }, { h: "Code", f: v => mono(v.code) }, { h: "Engin", f: v => esc((GEN().find(r => r.code === v.code) || {}).designation || "") },
         { h: "Compteur", n: 1, f: v => v.cpt ? nb(v.cpt) : '<span class="muted">–</span>' }, { h: "Source", f: v => esc(v.src) + (v.huile ? ' <span class="muted">' + esc(v.huile) + "</span>" : "") }], V.list, { empty: "Aucune vidange sur la période.", limit: 500 })],
-      ["pan", "Pannes déclarées", pans.length + " panne(s) · " + nb(pans.filter(p => p.en_cours).length) + " en cours", () => table([{ h: "Code", f: p => mono(p.code) }, { h: "Engin", f: p => esc((GE.eng.find(r => r.code === p.code) || {}).designation || "") },
+      ["pan", "Pannes déclarées", pans.length + " panne(s) · " + nb(pans.filter(p => p.en_cours).length) + " en cours", () => table([{ h: "Code", f: p => mono(p.code) }, { h: "Engin", f: p => esc((GEN().find(r => r.code === p.code) || {}).designation || "") },
         { h: "Début", f: p => fD(p.debut) }, { h: "Fin", f: p => p.en_cours ? '<span class="pill p-crit">en cours</span>' : fD(p.fin) }, { h: "Durée", n: 1, f: p => p.duree === null ? "–" : nb(p.duree) + " j" }, { h: "Motif de la panne", f: p => esc(p.description) }, { h: "N° DA", f: p => mono(p.num_da) }],
         pans.slice().sort((a, b) => (b.en_cours - a.en_cours) || N(b.duree) - N(a.duree)), { empty: "Aucune panne déclarée.", limit: 300 })],
       ["mvt", "Mouvements des engins", mv.length + " transfert(s)", () => table([{ h: "Code", f: v => mono(v.code) }, { h: "Engin", f: v => esc(v.description) }, { h: "Entrée", f: v => fD(v.date_entree) }, { h: "Sortie", f: v => fD(v.date_sortie) }, { h: "Destination", f: v => esc(v.destination) }], mv, { empty: "Aucun mouvement sur la période." })]];
@@ -2314,9 +2331,9 @@ function gePlanningHtml(P) {
    due : le compteur de l'engin a atteint la « prochaine vidange » connue au mois précédent ;
    à temps : une vidange enregistrée dans le mois au plus tard à prochaine vidange + 10 % de l'intervalle */
 function gePreventif(ml) {
-  const all = GE.mois.map(x => x.mois).sort(), V = geVidanges(all).list, res = [];
-  for (const m of ml) { const i = all.indexOf(m); if (i < 1) continue; const prev = all[i - 1], per = GE.mois.find(x => x.mois === m);
-    for (const r of GE.eng.filter(x => x.mois === m)) { const p = GE.eng.find(x => x.mois === prev && x.code === r.code); if (!p) continue; const due = N(p.proch_vidange) || N(p.vidange_prog); if (!due || r.cpt_fin === null) continue;
+  const all = GM().map(x => x.mois).sort(), V = geVidanges(all).list, res = [];
+  for (const m of ml) { const i = all.indexOf(m); if (i < 1) continue; const prev = all[i - 1], per = GM().find(x => x.mois === m);
+    for (const r of GEN().filter(x => x.mois === m)) { const p = GEN().find(x => x.mois === prev && x.code === r.code); if (!p) continue; const due = N(p.proch_vidange) || N(p.vidange_prog); if (!due || r.cpt_fin === null) continue;
       const vid = V.filter(v => v.code === r.code && inPeriod(v.date, per.debut, per.fin)), interval = p.der_vidange ? due - N(p.der_vidange) : 0, lim = due + Math.max(interval * GE_TOL, 0);
       if (N(r.cpt_fin) < due && !vid.length) continue;   /* pas encore due et rien fait */
       const v = vid.sort((a, b) => (a.date || "").localeCompare(b.date || ""))[0], cptV = v ? (N(v.cpt) || N(r.der_vidange)) : null;
@@ -2336,7 +2353,7 @@ function gePreventifHtml(B, P) {
     '<p class="hint">Vidange due = le compteur a atteint la « prochaine vidange » indiquée le mois précédent. À temps = vidange faite au plus tard à cette valeur + 10 % de l\'intervalle de vidange. Taux de réalisation = faites à temps ÷ dues (objectif ≥ 90 %).</p>'; }
 /* ---------- D. consommation d'huile par heure de marche (Suivi huiles ÷ reporting) ---------- */
 function geHuileH(ml, rows) {
-  const per = ml.map(m => GE.mois.find(x => x.mois === m)), by = new Map();
+  const per = ml.map(m => GM().find(x => x.mois === m)), by = new Map();
   for (const r of rows) { if (geKm(r)) continue; const o = by.get(r.code) || { code: r.code, des: r.designation, fam: r.famille, h: 0, l: 0, n: 0 }; o.h += N(r.hm); by.set(r.code, o); }
   let lTot = 0; for (const c of S.hCon.values()) { const p = per.find(x => inPeriod(c.date, x.debut, x.fin)); if (!p) continue; const o = by.get(c.engin); lTot += c.qte; if (!o) continue; o.l += c.qte; o.n++; }
   const L = [...by.values()].filter(o => o.l > 0), H = L.reduce((t, o) => t + o.h, 0), Lh = L.reduce((t, o) => t + o.l, 0);
@@ -2374,7 +2391,7 @@ function geFamille(fam, ml, rowsAll, pansAll, Vall) {
   return h + "</div>";
 }
 function geFiche(code, ml) {
-  const all = GE.eng.filter(r => r.code === code).sort((a, b) => a.mois.localeCompare(b.mois)); if (!all.length) return '<div class="banner crit" style="margin-top:10px">Code « ' + esc(code) + " » absent des reportings importés.</div>";
+  const all = GEN().filter(r => r.code === code).sort((a, b) => a.mois.localeCompare(b.mois)); if (!all.length) return '<div class="banner crit" style="margin-top:10px">Code « ' + esc(code) + " » absent des reportings importés.</div>";
   const R = all.filter(r => ml.includes(r.mois)), last = all[all.length - 1], e = S.engins.get(code) || {}, pans = gePannes(ml, code), A = geAgg(R, pans), V = geVidanges(ml, code), d1 = V.d1, d2 = V.d2;
   /* huiles : consommations saisies dans Suivi huiles → Consommation engins (période du reporting + total toutes dates) */
   const oilAll = [...S.hCon.values()].filter(c => c.engin === code), oil = oilAll.filter(c => inPeriod(c.date, d1, d2)), sq = (L, hu) => L.filter(c => c.huile === hu).reduce((t, c) => t + c.qte, 0);
@@ -2390,13 +2407,13 @@ function geFiche(code, ml) {
     h += '<div class="banner ' + (reste <= 50 ? "crit" : "info") + '">Dernier compteur saisi : <b>' + nb(PO.cpt) + u + "</b> le " + fD(PO.dRef) + ' <span class="muted">(' + esc(PO.cptSrc || "") + ")</span> · prochaine vidange à <b>" + nb(PO.proch) + u + "</b>" + (PO.manu ? " (✎ modifiée)" : "") + ' <button type="button" class="btn small" data-act="gp-proch" data-id="' + esc(PO.code) + '" title="Modifier le compteur de la prochaine vidange" style="padding:0 6px">✎ Modifier</button>' + " → " + (reste <= 0 ? "<b>dépassée de " + nb(-reste) + "</b>" : "reste " + nb(reste)) +
       (PO.dDer ? " · dernière vidange le " + fD(PO.dDer) + (PO.der ? " à " + nb(PO.der) : "") : "") + (PO.chg ? ' <span class="pill p-warn">⟲ compteur changé</span>' : "") + "</div>"; }
   else if (last.proch_vidange && last.cpt_fin !== null) { const reste = last.proch_vidange - last.cpt_fin; h += '<div class="banner ' + (reste <= 0 ? "crit" : reste <= 50 ? "crit" : "info") + '">Compteur fin ' + esc(moisTxt(last.mois)) + " : <b>" + nb(last.cpt_fin) + "</b> · prochaine vidange à <b>" + nb(last.proch_vidange) + "</b> → " + (reste <= 0 ? "<b>dépassée de " + nb(-reste) + "</b>" : "reste " + nb(reste)) + (last.date_vidange ? " · dernière vidange le " + fD(last.date_vidange) + (last.der_vidange ? " à " + nb(last.der_vidange) : "") : "") + "</div>"; }
-  { const pl = gePlanning().find(o => o.code === code), hh = geHuileH(ml, GE.eng.filter(x => ml.includes(x.mois))).L.find(o => o.code === code);
+  { const pl = gePlanning().find(o => o.code === code), hh = geHuileH(ml, GEN().filter(x => ml.includes(x.mois))).L.find(o => o.code === code);
     if (pl && pl.etat !== "inconnu") { const [t, c] = GE_PL[pl.etat]; h += '<div class="banner ' + (pl.etat === "retard" ? "crit" : pl.etat === "j7" ? "crit" : "info") + '">🛢 Prochaine vidange : <span class="pill ' + c + '">' + t + "</span> " + (pl.date ? "prévue le <b>" + fD(pl.date) + "</b>" : "") + " (compteur " + nb(pl.cpt) + " au " + fD(pl.dRef) + ", rythme " + nb(Math.round(pl.rate * 10) / 10) + (pl.km ? " km" : " h") + '/j) · <a href="#" data-act="ge-gamme" data-id="' + esc(code) + '">voir la gamme</a></div>'; }
     if (hh && hh.r !== null) h += '<div class="banner ' + (hh.ecart > 2 ? "crit" : "info") + '">Huile : <b>' + nb(Math.round(hh.r * 10) / 10) + " L / 100 h</b> de marche sur la période" + (hh.ecart ? " (× " + nb(Math.round(hh.ecart * 10) / 10) + " la médiane de la famille" + (hh.ecart > 2 ? " – à contrôler" : "") + ")" : "") + "</div>"; }
   { const ch = all.filter(r => r.cpt_changes && r.cpt_changes.length).flatMap(r => r.cpt_changes);
     if (ch.length) h += '<div class="banner info">⟲ Changement de compteur : ' + ch.map(c => "le <b>" + fD(c.date) + "</b> (ancien " + nb(c.avant) + " → nouveau " + nb(c.apres) + ")").join(" ; ") + ". Les heures du mois additionnent l'ancien et le nouveau compteur ; le suivi de vidange repart sur le nouveau compteur.</div>"; }
   /* calendrier des états jour par jour */
-  h += "<h4>Pointage jour par jour</h4>" + geLegend() + R.map(r => { const per = GE.mois.find(x => x.mois === r.mois) || {}; let d = per.debut ? new Date(per.debut + "T00:00:00Z") : null;
+  h += "<h4>Pointage jour par jour</h4>" + geLegend() + R.map(r => { const per = GM().find(x => x.mois === r.mois) || {}; let d = per.debut ? new Date(per.debut + "T00:00:00Z") : null;
     return '<div class="gcal"><span class="gcal-m">' + esc(moisTxt(r.mois)) + "</span>" + (r.etats || []).map(([s, c]) => { const ds = d ? d.toISOString().slice(0, 10) : ""; if (d) d = new Date(d.getTime() + 864e5); const k = s === "p" ? "P" : s;
       return '<i title="' + esc(fD(ds) + " : " + (GE_ETATS[k] ? GE_ETATS[k][0] : (s || "non pointé")) + (c ? " · compteur " + nb(c) : "")) + '" style="background:' + (GE_ETATS[k] ? GE_ETATS[k][1] : "transparent") + '">' + (+ds.slice(8) || "") + "</i>"; }).join("") + "</div>"; }).join("");
   h += "<h4>Mois par mois</h4>" + table([{ h: "Mois", f: r => esc(moisTxt(r.mois)) }, { h: "Marche", n: 1, f: r => nb(r.j_m) }, { h: "Arrêt fact.", n: 1, f: r => nb(r.j_af) }, { h: "Arrêt non fact.", n: 1, f: r => nb(r.j_anf) }, { h: "Panne", n: 1, f: r => r.j_panne ? '<span class="reste">' + nb(r.j_panne) + "</span>" : "0" }, { h: "Transfert", n: 1, f: r => nb(r.j_tr) },
@@ -2492,7 +2509,7 @@ document.addEventListener("click", async e => { const b = e.target.closest("[dat
     if (a === "ge-add") return S.isAdmin && geImportForm();
     if (a === "ge-pt") return S.isAdmin && gePtForm();
     if (a === "ge-list") return S.isAdmin && geListForm();
-    if (a === "ge-cumul") { const L = GE.mois.map(x => x.mois).sort(); S.f.geFrom = L[0]; S.f.geTo = L[L.length - 1]; return render(); }
+    if (a === "ge-cumul") { const L = GM().map(x => x.mois).sort(); S.f.geFrom = L[0]; S.f.geTo = L[L.length - 1]; return render(); }
     if (a === "ge-code") { const c = $("#ge-code"); S.f.geCode = c ? c.value.trim().split(/\s+[–-]\s+/)[0] : ""; return render(); }
     if (a === "ge-code-x") { S.f.geCode = ""; return render(); }
     if (a === "ge-ptdet") { S.f.gePtDet = !S.f.gePtDet; return render(); }
