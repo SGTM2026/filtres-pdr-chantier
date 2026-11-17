@@ -265,7 +265,7 @@ VIEWS.entrees = { title: () => "Entrées – " + CATS[S.f.cat].label,
 VIEWS.sorties = { title: () => "Sorties – " + CATS[S.f.cat].label,
   tools: () => catTabs(S.f.cat) + '<div class="chips" style="margin:0 0 8px"><button type="button" class="btn small' + (S.f.sorMode !== "tr" ? " primary" : "") + '" data-act="so-mode" data-id="so">Sorties</button><button type="button" class="btn small' + (S.f.sorMode === "tr" ? " primary" : "") + '" data-act="so-mode" data-id="tr">⇄ Transferts vers autres chantiers</button></div>' +
     '<div class="tools">' + searchF("so-q", S.f.sorQ, S.f.sorMode === "tr" ? "Réf., N° bon, chantier…" : "Réf., engin, intervention…") + field("so-f", "Du", '<input id="so-f" type="date" value="' + esc(S.f.sorFrom) + '">') + field("so-t", "Au", '<input id="so-t" type="date" value="' + esc(S.f.sorTo) + '">') +
-    '<span class="grow"></span><button class="btn" data-act="xls-sor">Exporter Excel</button>' + (S.canWrite ? (S.f.sorMode === "tr" ? "" : '<button class="btn" data-act="imp-sorties">Importer Excel</button>') + '<button class="btn" data-act="new-transfert" title="Filtres ou PDR transférés à un autre chantier">⇄ Transfert</button><button class="btn primary" data-act="new-sortie">+ Nouvelle sortie</button>' : "") + "</div>",
+    '<span class="grow"></span><button class="btn" data-act="xls-sor">Exporter Excel</button>' + (S.canWrite ? (S.f.sorMode === "tr" ? "" : '<button class="btn" data-act="imp-sorties">Importer Excel</button>') + (S.isAdmin ? '<button class="btn" data-act="so-undo" title="Annuler une saisie, une modification ou une suppression de sortie">↶ Annuler une action</button>' : "") + '<button class="btn" data-act="new-transfert" title="Filtres ou PDR transférés à un autre chantier">⇄ Transfert</button><button class="btn primary" data-act="new-sortie">+ Nouvelle sortie</button>' : "") + "</div>",
   bind() { ["so-q", "so-f", "so-t"].forEach(id => $("#" + id).addEventListener(id === "so-q" ? "input" : "change", () => { S.f.sorQ = $("#so-q").value; S.f.sorFrom = $("#so-f").value; S.f.sorTo = $("#so-t").value; render(); })); },
   rows() { const q = norm(S.f.sorQ), tr = S.f.sorMode === "tr"; return C.sor.filter(s => s.cat === S.f.cat && !!s.tr === tr && inPeriod(s.date, S.f.sorFrom, S.f.sorTo) && (!q || norm([s.ref, s.engin, s.label, s.enginInit, s.intervention, s.atelier, s.obs, s.type, s.numTr, s.dest].join(" ")).includes(q))).reverse(); },
   body() { const r = this.rows(), K = CATS[S.f.cat];
@@ -2583,6 +2583,7 @@ document.addEventListener("click", async e => { const b = e.target.closest("[dat
     if (a === "da-xls-all") { const r = VIEWS.suivida.rows(); if (!r.length) { toast("Aucune DA à exporter."); return; } return await daExcel(r, "Suivi_DA_" + today() + ".xlsx"); }
     if (a === "new-sortie") return sortieForm();
     if (a === "new-transfert") return transfertForm();
+    if (a === "so-undo") return soUndoForm().catch(err => toast("Annuler : " + errMsg(err)));
     if (a === "so-mode") { S.f.sorMode = id; return render(true); }
     if (a === "imp-entrees") return importDialog("entrees");
     if (a === "imp-sorties") return importDialog("sorties");
@@ -2617,6 +2618,23 @@ function xls(name, sheet, rows) { if (!window.XLSX) { toast("Export indisponible
 /* ---------- chargement et temps réel ---------- */
 async function fetchAll(table, order) { const out = []; for (let from = 0; ; from += 1000) { const data = await must(sb.from(table).select("*").order(order, { ascending: true }).range(from, from + 999)); out.push(...data); if (data.length < 1000) break; } return out; }
 async function loadProfiles() { const r = await fetchAll("profiles", "created_at"); S.profiles = new Map(r.map(p => [p.id, p])); if (S.uid && S.profiles.get(S.uid)) S.me = S.profiles.get(S.uid); }
+/* annulation d'actions sur les sorties (administrateur) : à partir du journal */
+async function soUndoForm() { if (!S.isAdmin) return;
+  const J = await must(sb.from("journal").select("id,at,user_id,action,record_id,resume,avant,annule_at,annule_by").eq("table_name", "sorties").order("id", { ascending: false }).limit(80));
+  const ACT = { insert: "Ajout", update: "Modification", delete: "Suppression" }, last = new Map(); for (const j of J) if (!j.annule_at && !last.has(j.record_id)) last.set(j.record_id, j.id);
+  const etat = j => { if (j.annule_at) return '<span class="pill p-ok" title="par ' + esc(nameOf(j.annule_by)) + '">annulée le ' + fDT(j.annule_at) + "</span>";
+    if (j.action === "insert" && !S.sorties.has(+j.record_id)) return '<span class="muted">ligne déjà supprimée</span>';
+    if (j.action !== "insert" && !j.avant) return '<span class="muted" title="action enregistrée avant la mise en place de l\'annulation">non annulable</span>';
+    if (j.action !== "insert" && last.get(j.record_id) !== j.id) return '<span class="muted" title="annulez d\'abord l\'action plus récente sur cette sortie">action plus récente</span>';
+    return '<button type="button" class="btn small danger" data-undo="' + j.id + '">↶ Annuler</button>'; };
+  const ov = modal("Annuler une action sur les sorties", '<p class="muted" style="margin-top:0">80 dernières actions sur les sorties et transferts. Annuler un <b>ajout</b> supprime la sortie (le stock revient) ; annuler une <b>modification</b> remet les valeurs d\'avant ; annuler une <b>suppression</b> recrée la sortie.</p>' +
+    table([{ h: "Date", f: j => fDT(j.at) }, { h: "Par", f: j => esc(nameOf(j.user_id)) }, { h: "Action", f: j => '<span class="pill ' + (j.action === "delete" ? "p-crit" : j.action === "update" ? "p-warn" : "p-acc") + '">' + (ACT[j.action] || j.action) + "</span>" }, { h: "Détail", f: j => esc(j.resume) }, { h: "", f: etat }], J, { empty: "Aucune action sur les sorties.", limit: 80 }),
+    async () => {}, "Fermer", true);
+  ov.addEventListener("click", e => { const b = e.target.closest("[data-undo]"); if (!b) return; e.preventDefault(); const j = J.find(x => String(x.id) === b.dataset.undo); if (!j) return;
+    confirmBox("Annuler cette action : « " + (ACT[j.action] || j.action) + " — " + j.resume + " » ?", async () => {
+      await must(sb.rpc("annuler_sortie", { jid: j.id })); const id = +j.record_id;
+      if (j.action === "insert") { S.sorties.delete(id); schedule(); } else { const r = await must(sb.from("sorties").select("*").eq("id", id).maybeSingle()); if (r) applyRow("sorties", r); else { S.sorties.delete(id); schedule(); } }
+      toast("Action annulée : " + j.resume); ov.remove(); soUndoForm(); }); }); }
 function applyRow(table, row) {
   if (table === "entrees") S.entrees.set(row.id, mapE(row)); else if (table === "sorties") S.sorties.set(row.id, mapS(row));
   else if (table === "stock_depart") S.depart.set(row.id, mapD(row)); else if (table === "engins") S.engins.set(String(row.code), mapG(row));
