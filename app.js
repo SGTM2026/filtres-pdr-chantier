@@ -272,11 +272,11 @@ VIEWS.sorties = { title: () => "Sorties – " + CATS[S.f.cat].label,
     if (S.f.sorMode === "tr") return '<div class="more">' + r.length + " transfert(s) · " + nb(r.reduce((t, s) => t + N(s.qte), 0)) + " " + K.many + " transféré(e)s vers d'autres chantiers</div>" + table([
       { h: "Catégorie", f: s => catLbl(s.cat) }, { h: "Date", f: s => fD(s.date) }, { h: "N° bon transfert", f: s => mono(s.numTr) }, { h: "Référence", f: s => mono(s.ref) }, { h: "Désignation", f: s => esc(s.type) }, { h: "Qté", n: 1, f: s => "<b>" + nb(s.qte) + "</b>" },
       { h: "Code engin", f: s => s.enginInit ? mono(s.enginInit) : '<span class="muted">stock commun</span>' }, { h: "Chantier destination", f: s => "<b>" + esc(s.dest) + "</b>" }, { h: "Observation", f: s => esc(s.obs) },
-      { h: "Saisi par", f: s => who(s.createdBy) }, { h: "", f: s => rowActs("sortie", s) }], r, { empty: "Aucun transfert de " + K.many + " vers un autre chantier." });
+      { h: "Saisi par", f: s => who(s.createdBy) }, { h: "", f: s => rowActs("sortie", s) + (S.isAdmin ? ' <button type="button" class="btn small" data-act="so-undo-row" data-id="' + s.id + '" title="Annuler la dernière action sur cette ligne (ajout ou modification)">↶ Annuler</button>' : "") }], r, { empty: "Aucun transfert de " + K.many + " vers un autre chantier." });
     return '<div class="more">' + r.length + " sortie(s) · " + nb(r.reduce((t, s) => t + N(s.qte), 0)) + " " + K.many + " sorti(e)s</div>" + table([
     { h: "Date", f: s => fD(s.date) }, { h: "Monté sur", f: s => mono(s.engin) }, { h: "Engin", f: s => s.engin ? esc(s.label) : "" }, { h: "Référence", f: s => mono(s.ref) }, { h: K.type, f: s => esc(s.type) }, { h: "Qté", n: 1, f: s => nb(s.qte) },
     { h: "Pris sur", f: s => mvtPill(s) }, { h: "Intervention", f: s => esc(s.intervention) }, { h: "Compteur", n: 1, f: s => nb(s.compteur) }, { h: "Atelier", f: s => esc(s.atelier) }, { h: "Observations", f: s => esc(s.obs) },
-    { h: "Saisi par", f: s => who(s.createdBy) }, { h: "", f: s => rowActs("sortie", s) }], r, { empty: "Aucune sortie de " + K.many + "." }); } };
+    { h: "Saisi par", f: s => who(s.createdBy) }, { h: "", f: s => rowActs("sortie", s) + (S.isAdmin ? ' <button type="button" class="btn small" data-act="so-undo-row" data-id="' + s.id + '" title="Annuler la dernière action sur cette ligne (ajout ou modification)">↶ Annuler</button>' : "") }], r, { empty: "Aucune sortie de " + K.many + "." }); } };
 
 VIEWS.engin = { title: "Suivi par engin",
   tools: () => '<div class="tools">' + field("eg-q", "Code engin", '<input id="eg-q" list="dl-engins" placeholder="ex. 50406" value="' + esc(S.selEngin) + '">') + "</div>",
@@ -2583,6 +2583,14 @@ document.addEventListener("click", async e => { const b = e.target.closest("[dat
     if (a === "da-xls-all") { const r = VIEWS.suivida.rows(); if (!r.length) { toast("Aucune DA à exporter."); return; } return await daExcel(r, "Suivi_DA_" + today() + ".xlsx"); }
     if (a === "new-sortie") return sortieForm();
     if (a === "new-transfert") return transfertForm();
+    if (a === "so-undo-row") { if (!S.isAdmin) return; return (async () => { const J = await must(sb.from("journal").select("id,action,resume,avant,annule_at").eq("table_name", "sorties").eq("record_id", id).is("annule_at", null).order("id", { ascending: false }).limit(1));
+        const j = J[0]; if (!j) return toast("Aucune action à annuler sur cette ligne.");
+        if (j.action === "update" && !j.avant) return toast("Modification trop ancienne : elle ne peut pas être annulée.");
+        const T = { insert: "l'ajout", update: "la dernière modification", delete: "la suppression" }[j.action] || j.action;
+        confirmBox("Annuler " + T + " : « " + j.resume + " » ?" + (j.action === "insert" ? " La sortie sera supprimée et le stock reviendra." : " Les valeurs d'avant seront remises."), async () => {
+          await must(sb.rpc("annuler_sortie", { jid: j.id })); const n = +id;
+          if (j.action === "insert") { S.sorties.delete(n); schedule(); } else { const r = await must(sb.from("sorties").select("*").eq("id", n).maybeSingle()); if (r) applyRow("sorties", r); else { S.sorties.delete(n); schedule(); } }
+          toast("Action annulée : " + j.resume); }); })().catch(err => toast("Annuler : " + errMsg(err))); }
     if (a === "so-undo") return soUndoForm().catch(err => toast("Annuler : " + errMsg(err)));
     if (a === "so-mode") { S.f.sorMode = id; return render(true); }
     if (a === "imp-entrees") return importDialog("entrees");
