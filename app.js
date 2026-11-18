@@ -2094,14 +2094,15 @@ function gePlanning() {
     if (chg && chg.date && dRef && cpt !== null) { const jN = Math.round((Date.parse(dRef) - Date.parse(chg.date)) / 864e5);
       if (jN >= 3 && N(cpt) >= N(chg.apres)) { rate = (N(cpt) - N(chg.apres)) / jN; rateSrc = "nouveau compteur, " + jN + " j"; } else rateSrc = "3 derniers mois (nouveau compteur trop récent)"; }
     const o = { chg, rateSrc, cptSrc, code: r.code, des: r.designation, fam: r.famille, km, cpt: cpt === null ? null : N(cpt), dRef, proch: prochVal || null, der: N(r.der_vidange) || null, dDer: r.date_vidange, rate, mois: r.mois };
-    /* vidange saisie dans Suivi huiles après le reporting : elle remet le compteur à zéro → nouvelle prochaine vidange = compteur de cette vidange + intervalle */
+    /* vidange saisie dans Suivi huiles après le reporting : nouvelle prochaine vidange = compteur de cette vidange + 500 h / 10 000 km */
     const interval = N(r.proch_vidange) && N(r.der_vidange) && N(r.proch_vidange) > N(r.der_vidange) ? N(r.proch_vidange) - N(r.der_vidange) : null;
     const vh = [...S.hCon.values()].filter(c => c.engin === r.code && c.entretien === "Vidange" && c.date > (per.fin || "")).sort((a, b) => (b.date || "").localeCompare(a.date || ""))[0];
     if (vh) { const cv = N(vh.compteur) > 0 ? N(vh.compteur) : (o.cpt !== null ? Math.round(N(r.cpt_fin) + rate * Math.max(0, (Date.parse(vh.date) - Date.parse(per.fin)) / 864e5)) : null);
       o.dDer = vh.date; o.der = cv; o.src = "Suivi huiles" + (N(vh.compteur) > 0 ? "" : " (compteur estimé)");
-      if (interval && cv !== null) o.proch = cv + interval; else if (cv !== null) { o.proch = null; o.note = "intervalle de vidange inconnu"; } }
+      /* vidange faite (Suivi huiles) : prochaine = compteur de la vidange + 500 h (engins à heures) ou + 10 000 km (véhicules) */
+      if (cv !== null) o.proch = cv + GE_INTV(km); }
     else if (r.date_vidange) o.src = "Reporting";
-    o.intv = interval;
+    o.intv = vh ? GE_INTV(km) : interval;
     /* « Vidange à » modifiée à la main dans Planning vidanges : valable tant qu'aucun reporting ni vidange plus récents n'est arrivé */
     { const m = (S.params.ge_proch || {})[r.code]; if (m && N(m.v) > 0 && m.date >= (per.fin || "") && m.date >= (o.dDer || "")) { o.manu = { v: N(m.v), date: m.date, calc: o.proch }; o.proch = N(m.v); } }
     if (!o.proch || o.cpt === null) { o.etat = "inconnu"; out.push(o); continue; }
@@ -2154,6 +2155,9 @@ const gpK = f => nh(f || "").replace(/[^a-z0-9]/g, "");
 const GP_FAMK = new Map(Object.entries(GP_FAM).flatMap(([a, L]) => L.map(f => [gpK(f), a])));
 const gpAtFam = x => GP_FAMK.get(gpK(x.fam)) || GP_FAMK.get(gpK((S.inv.get(x.code) || {}).famille)) || "NA";
 const gpAt = x => { const o = S.params.ge_atelier || {}; return GP_AT[o[x.code]] ? o[x.code] : gpAtFam(x); };
+const GE_INTV = km => km ? 10000 : 500;
+/* vidange lancée déjà réalisée : une vidange de cet engin est saisie dans Suivi huiles depuis le lancement */
+const vlFaite = v => [...S.hCon.values()].some(c => c.engin === v.code && c.entretien === "Vidange" && (c.date || "") >= String(v.lance_at || v.date_prevue).slice(0, 10));
 /* vidanges lancées par l'administrateur : visibles par tous les comptes (feuille Planning vidanges) */
 const VL = { loaded: false, loading: null, list: [] };
 const vlLoad = force => { if (VL.loaded && !force) return Promise.resolve(); return VL.loading = fetchAll("vid_lances", "date_prevue").then(r => { VL.list = r; VL.loaded = true; VL.loading = null; if (S.view === "gplan") render(); }).catch(err => { VL.loading = null; VL.loaded = true; toast("Vidanges lancées : " + errMsg(err)); }); };
@@ -2162,7 +2166,7 @@ let GP_ROWS = new Map();
 const gpPdfBtn = (code, ci) => '<button type="button" class="btn small" data-act="gp-gpdf" data-id="' + esc(code) + '" data-cyc="' + (ci || 0) + '" title="Télécharger la gamme de vidange de ce cycle (PDF)">Gamme PDF</button>' +
   '<button type="button" class="btn small" data-act="ge-gamme" data-id="' + esc(code) + '" data-cyc="' + (ci || 0) + '" title="Ouvrir la feuille Gamme maintenance prv de cette vidange">Gamme</button>';
 function gplanAutres() { if (!VL.loaded) { if (!VL.loading) vlLoad(); return '<div class="empty">Chargement des vidanges lancées…</div>'; }
-  const per = gpPeriode(), L = VL.list.filter(v => v.date_prevue >= per.d1 && v.date_prevue <= per.d2).sort((a, b) => a.date_prevue.localeCompare(b.date_prevue) || a.code.localeCompare(b.code));
+  const per = gpPeriode(), L = VL.list.filter(v => v.date_prevue >= per.d1 && v.date_prevue <= per.d2 && !vlFaite(v)).sort((a, b) => a.date_prevue.localeCompare(b.date_prevue) || a.code.localeCompare(b.code));
   const cols = [{ h: "Date prévue", f: v => "<b>" + fD(v.date_prevue) + "</b>" }, { h: "Code", f: v => mono(v.code) }, { h: "Engin", f: v => esc(v.engin || "") || '<span class="muted">–</span>' }, { h: "Catégorie", f: v => esc(v.categorie || "") }, { h: "Type", f: v => esc(v.type || "") },
     { h: "Dérn Compteur", n: 1, f: v => v.cpt_dern === null ? "–" : nb(v.cpt_dern) + " " + esc(v.unite || "h") + (v.date_dern ? '<br><span class="muted" style="font-size:11px">au ' + fD(v.date_dern) + "</span>" : "") },
     { h: "Vidange à", n: 1, f: v => v.cpt_prevu === null ? "–" : "<b>" + nb(v.cpt_prevu) + " " + esc(v.unite || "h") + "</b>" }, { h: "Cycle vidange", f: v => "<b>" + esc(v.cycle || "–") + "</b>" },
@@ -2326,7 +2330,7 @@ function gePlanningHtml(P) {
       { h: "État", f: o => { const [t, c] = GE_PL[o.etat]; return '<span class="pill ' + c + '">' + t + "</span>"; } },
       { h: "Dernière vidange", f: o => o.dDer ? fD(o.dDer) + '<br><span class="muted" style="font-size:11px">' + (o.der ? "à " + nb(o.der) + " · " : "") + esc(o.src || "") + "</span>" : '<span class="muted">' + esc(o.note || "–") + "</span>" },
       { h: "", f: o => '<button type="button" class="btn small" data-act="ge-gamme" data-id="' + esc(o.code) + '" title="Filtres à préparer">Gamme</button>' }], L, { empty: "Aucun engin dans cette catégorie.", limit: 400 }) +
-    '<p class="hint">Date prévue = date du dernier compteur + (prochaine vidange − compteur) ÷ rythme moyen des 3 derniers mois pointés (après un changement de compteur : rythme mesuré sur le nouveau compteur seul, depuis la date du changement). Compteur actuel = fin du dernier reporting, ou compteur plus récent saisi dans Suivi huiles. Une vidange saisie dans Suivi huiles après le dernier reporting remplace la « dernière vidange » : prochaine vidange = son compteur + l\'intervalle de l\'engin (prochaine − dernière vidange du reporting). « Données manquantes » = pas de compteur de prochaine vidange dans le reporting. Seuls les engins présents dans l\'Inventaire (actuellement sur le projet) sont listés. ⟲ = compteur changé : le planning utilise le nouveau compteur (dernier relevé du mois, et non le plus grand) et la « prochaine vidange » du reporting, qui doit être exprimée sur ce nouveau compteur.</p>'; }
+    '<p class="hint">Date prévue = date du dernier compteur + (prochaine vidange − compteur) ÷ rythme moyen des 3 derniers mois pointés (après un changement de compteur : rythme mesuré sur le nouveau compteur seul, depuis la date du changement). Compteur actuel = fin du dernier reporting, ou compteur plus récent saisi dans Suivi huiles. Une vidange saisie dans Suivi huiles après le dernier reporting remplace la « dernière vidange » : prochaine vidange = son compteur + 500 h (engins à heures) ou + 10 000 km (véhicules), et la vidange sort du planning. « Données manquantes » = pas de compteur de prochaine vidange dans le reporting. Seuls les engins présents dans l\'Inventaire (actuellement sur le projet) sont listés. ⟲ = compteur changé : le planning utilise le nouveau compteur (dernier relevé du mois, et non le plus grand) et la « prochaine vidange » du reporting, qui doit être exprimée sur ce nouveau compteur.</p>'; }
 /* ---------- B. réalisation du préventif ----------
    due : le compteur de l'engin a atteint la « prochaine vidange » connue au mois précédent ;
    à temps : une vidange enregistrée dans le mois au plus tard à prochaine vidange + 10 % de l'intervalle */
