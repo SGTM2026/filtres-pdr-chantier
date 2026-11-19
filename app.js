@@ -1834,6 +1834,8 @@ function geImportForm() {
    SAISIE COMPTEUR : pointage de quelques jours (canevas Excel) en attendant le reporting de fin de mois
    ===================================================================== */
 const PT_ETATS = ["M", "AF", "ANF", "P", "TR"];
+/* dimanche : pointé ANF (arrêt non facturé) par défaut, sauf état saisi (marche ou panne un dimanche) */
+const isDim = iso => new Date(Date.parse(iso)).getUTCDay() === 0;
 /* dernier compteur connu d'un engin (reporting, pointage, Suivi huiles) */
 function geLastCpt(code) { let best = null; const add = (d, c, src) => { if (N(c) > 0 && d && (!best || d > best.d)) best = { d, c: N(c), src }; };
   for (const r of GE.eng) if (r.code === code) add((GE.mois.find(x => x.mois === r.mois) || {}).fin, r.cpt_fin, "Reporting");
@@ -1856,7 +1858,7 @@ async function gePtCanevas(d1, nj) {
   H.forEach((h, i) => { ws.mergeCells(5, i + 1, 6, i + 1); const c = ws.getCell(5, i + 1); c.value = h; });
   for (let k = 0; k < nj; k++) { const c0 = FIX + 1 + k * 2; ws.mergeCells(5, c0, 5, c0 + 1); const c = ws.getCell(5, c0); c.value = d1 ? new Date(Date.parse(addJ(d1, k))) : null; c.numFmt = "dd/mm/yyyy";
     c.dataValidation = { type: "date", operator: "greaterThan", allowBlank: true, formulae: [new Date(Date.UTC(2020, 0, 1))], showErrorMessage: true, error: "Saisir une date (jj/mm/aaaa)." };
-    ws.getCell(6, c0).value = "Compteur"; ws.getCell(6, c0 + 1).value = "Etat"; }
+    ws.getCell(6, c0).value = "Compteur"; ws.getCell(6, c0 + 1).value = d1 && isDim(addJ(d1, k)) ? "Etat (dim.)" : "Etat"; }
   for (const r of [5, 6]) for (let c = 1; c <= last; c++) { const x = ws.getCell(r, c); x.font = { bold: true, color: { argb: c > FIX && r === 5 ? "FF1F3864" : "FFFFFFFF" } }; x.fill = fill(c > FIX && r === 5 ? "FFFFF2CC" : "FF2F5496"); x.border = bd; x.alignment = { horizontal: "center", vertical: "middle", wrapText: true }; }
   ws.getRow(5).height = 22; ws.getRow(6).height = 18;
   const fam = x => (S.inv.get(x) || {}).famille || ((GE.eng.find(r => r.code === x)) || {}).famille || "";
@@ -1867,6 +1869,7 @@ async function gePtCanevas(d1, nj) {
     row.eachCell({ includeEmpty: true }, (c, ci) => { if (ci > last) return; c.border = bd; c.alignment = { vertical: "middle", horizontal: ci === 1 ? "center" : "left" };
       if (ci <= FIX) c.fill = fill(i % 2 ? "FFF2F5FA" : "FFFFFFFF"); });
     for (let c = last; c > FIX; c--) { const x = row.getCell(c); x.border = bd; }
+    if (d1) for (let k = 0; k < nj; k++) if (isDim(addJ(d1, k))) { const x = row.getCell(FIX + 2 + k * 2); x.value = "ANF"; x.alignment = { horizontal: "center" }; x.fill = fill("FFEDEDED"); row.getCell(FIX + 1 + k * 2).fill = fill("FFEDEDED"); }
     row.getCell(1).font = { bold: true }; });
   const r1 = 7, r2 = 6 + codes.length;
   for (let k = 0; k < nj; k++) { const cc = FIX + 1 + k * 2, L = c => ws.getColumn(c).letter;
@@ -1876,7 +1879,7 @@ async function gePtCanevas(d1, nj) {
   const h = wb.addWorksheet("Mode d'emploi"); h.columns = [{ width: 110 }];
   ["CANEVAS DE POINTAGE – MODE D'EMPLOI", "", "1. Écrire la date de chaque jour pointé dans les cases jaunes (une colonne Compteur + État par jour, jusqu'à " + nj + " jours par fichier).", "2. Pour chaque engin, saisir le compteur lu (heures ou km, voir la colonne Unité) et l'état du jour.",
     "3. Laisser vide un engin non pointé. Ne pas supprimer ni modifier les colonnes Code.", "4. Importer le fichier dans le site : Gestion engins › ⏱ Saisie compteur › Pointage Excel. Les dates sont lues automatiquement.",
-    "5. Réimporter un même jour remplace les compteurs déjà saisis pour ce jour.", "", "États :", "M = Marche", "AF = Arrêt facturé", "ANF = Arrêt non facturé", "P = Panne", "TR = Transfert / hors chantier", "",
+    "5. Réimporter un même jour remplace les compteurs déjà saisis pour ce jour.", "6. Dimanche : ANF par défaut (déjà rempli) ; remplacer par M ou P si l'engin a travaillé ou était en panne.", "", "États :", "M = Marche", "AF = Arrêt facturé", "ANF = Arrêt non facturé", "P = Panne", "TR = Transfert / hors chantier", "",
     "Les engins sont classés dans le même ordre que le dernier reporting importé."].forEach((x, i) => { const r = h.addRow([x]); if (i === 0) r.font = { bold: true, size: 13 }; if (x === "États :") r.font = { bold: true }; });
   saveBlob(new Blob([await wb.xlsx.writeBuffer()], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), "Canevas_pointage_compteurs" + (d1 ? "_" + d1 : "") + ".xlsx"); }
 /* lecture d'un canevas de pointage (le nôtre ou l'ancien CANVA POINTAGE) */
@@ -1893,7 +1896,7 @@ function gePtParse(aoa, dDef) {
   const out = [], inconnus = new Set(); let sansDate = 0;
   for (const r of aoa.slice(si + 1)) { if (!r) continue; const code = String(r[ci] ?? "").trim(); if (!/^\d{3,7}$/.test(code)) continue;
     for (const p of pairs) { const c = xlCpt(r[p.c]), e = String(r[p.e] ?? "").trim().toUpperCase(); if (c === null && !e) continue; const d = p.d || dDef; if (!d) { sansDate++; continue; }
-      if (S.inv.size && !S.inv.has(code)) inconnus.add(code); out.push({ code, date: d, compteur: c, etat: PT_ETATS.includes(e) ? e : (e || null) }); } }
+      if (S.inv.size && !S.inv.has(code)) inconnus.add(code); out.push({ code, date: d, compteur: c, etat: PT_ETATS.includes(e) ? e : (e || (isDim(d) ? "ANF" : null)) }); } }
   return { rows: out, dates: [...new Set(out.map(x => x.date))].sort(), pairs, sansDate, inconnus: [...inconnus], blocsSansDate: pairs.filter(p => !p.d).length }; }
 /* mois « virtuels » : mois de pointage (26 → 25) sans reporting importé, reconstruits à partir des compteurs et états saisis.
    Ils s'ajoutent aux reportings dans les filtres Du mois / Au mois, la fiche engin (pointage jour par jour, mois par mois) et les tableaux de bord ; le planning des vidanges n'utilise que les reportings + compteurs. */
@@ -1904,7 +1907,7 @@ function geVirt() { const k = GE.pt.length + "|" + GE.eng.length + "|" + GE.mois
     m.push({ id: "v" + key, mois, debut: P.d1, fin: P.d2, virt: true });
     const nj = Math.round((Date.parse(P.d2) - Date.parse(P.d1)) / 864e5) + 1, prev = decMois(key, -1);
     for (const code of [...new Set(pts.map(t => t.code))]) { const by = new Map(pts.filter(t => t.code === code).map(t => [t.date, t]));
-      const et = Array.from({ length: nj }, (_, i) => { const t = by.get(addJ(P.d1, i)); return { d: addJ(P.d1, i), e: t && t.etat ? String(t.etat).toUpperCase() : "", c: t && N(t.compteur) > 0 ? N(t.compteur) : null }; });
+      const et = Array.from({ length: nj }, (_, i) => { const d = addJ(P.d1, i), t = by.get(d); return { d, e: t && t.etat ? String(t.etat).toUpperCase() : (isDim(d) && d <= today() ? "ANF" : ""), c: t && N(t.compteur) > 0 ? N(t.compteur) : null }; });
       const K = geCounter(et), n = x => et.filter(o => o.e === x).length, r0 = GE.eng.filter(r => r.code === code).sort((a, b) => b.mois.localeCompare(a.mois))[0] || {}, rp = GE.eng.find(r => r.code === code && r.mois.slice(0, 7) === prev), inv = S.inv.get(code) || {};
       const first = K.vals.length ? K.vals[0] : null, gap = rp && N(rp.cpt_fin) > 0 && first !== null && !K.changes.length && first >= N(rp.cpt_fin) && first - N(rp.cpt_fin) < (geUnite(code) === "km" ? 5000 : 300) ? first - N(rp.cpt_fin) : 0;
       e.push({ id: "v" + key + code, virt: true, mois, code, designation: r0.designation || inv.gamme || null, famille: r0.famille || inv.famille || "Autre", categorie: r0.categorie || inv.categorie || null, marque: r0.marque || inv.marque || null, type: r0.type || inv.type || null, serie: r0.serie || null,
@@ -1918,14 +1921,15 @@ function gePtMois() { const list = [...new Set(GE.pt.map(t => moisPt(t.date)))].
   const pts = GE.pt.filter(t => t.date >= P.d1 && t.date <= P.d2), codes = [...new Set(pts.map(t => t.code))];
   const rows = codes.map(code => { const L = pts.filter(t => t.code === code).sort((a, b) => a.date.localeCompare(b.date)), rp = GE.eng.find(r => r.code === code && r.mois.slice(0, 7) === prev), inv = S.inv.get(code) || {};
     const avecC = L.filter(t => N(t.compteur) > 0), dern = avecC[avecC.length - 1] || null, deb = rp && N(rp.cpt_fin) > 0 ? N(rp.cpt_fin) : (avecC[0] ? N(avecC[0].compteur) : null);
-    const et = {}; for (const t of L) if (t.etat) et[t.etat] = (et[t.etat] || 0) + 1; const delta = dern && deb !== null ? N(dern.compteur) - deb : null;
+    const byD = new Map(L.map(t => [t.date, t])); for (let d = P.d1; d <= fin; d = addJ(d, 1)) if (isDim(d) && !(byD.get(d) || {}).etat) byD.set(d, Object.assign({ code, date: d, compteur: null }, byD.get(d) || {}, { etat: "ANF", auto: true }));
+    const et = {}; for (const t of byD.values()) if (t.etat) et[t.etat] = (et[t.etat] || 0) + 1; const delta = dern && deb !== null ? N(dern.compteur) - deb : null;
     const r0 = GE.eng.filter(r => r.code === code).sort((a, b) => b.mois.localeCompare(a.mois))[0] || {};
-    return { code, fam: inv.famille || r0.famille || "", eng: inv.gamme || r0.designation || "", u: geUnite(code), deb, debSrc: rp && N(rp.cpt_fin) > 0 ? "fin " + moisTxt(rp.mois) : "1er pointage", dern, delta, chg: delta !== null && delta < 0, nj: L.length, et, byD: new Map(L.map(t => [t.date, t])) }; })
+    return { code, fam: inv.famille || r0.famille || "", eng: inv.gamme || r0.designation || "", u: geUnite(code), deb, debSrc: rp && N(rp.cpt_fin) > 0 ? "fin " + moisTxt(rp.mois) : "1er pointage", dern, delta, chg: delta !== null && delta < 0, nj: L.length, et, byD }; })
     .sort((a, b) => a.fam.localeCompare(b.fam) || a.code.localeCompare(b.code));
   return { list, key, P, fin, rows }; }
 function gePtMoisHtml(M) { if (!M.key) return '<div class="empty">Aucun compteur saisi : utilisez « ⏱ Saisie compteur ».</div>';
   const tot = (k) => M.rows.reduce((t, r) => t + (r.et[k] || 0), 0), hTot = M.rows.filter(r => r.u !== "km" && r.delta > 0).reduce((t, r) => t + r.delta, 0), kmTot = M.rows.filter(r => r.u === "km" && r.delta > 0).reduce((t, r) => t + r.delta, 0);
-  const jours = M.rows.length ? [...new Set(M.rows.flatMap(r => [...r.byD.keys()]))].sort() : [];
+  const jours = M.rows.length ? [...new Set(M.rows.flatMap(r => [...r.byD.keys()]))].sort() : [];   /* dimanches ANF inclus */
   let h = '<div class="tools" style="margin-bottom:8px">' + field("ge-ptm", "Mois de pointage", '<select id="ge-ptm" onchange="void 0">' + M.list.map(k => '<option value="' + k + '"' + (k === M.key ? " selected" : "") + ">" + esc(moisTxt(k)) + "</option>").join("") + "</select>") +
     '<div class="muted" style="align-self:flex-end">du ' + fD(M.P.d1) + " au " + fD(M.P.d2) + " · " + jours.length + " jour(s) pointé(s)" + (jours.length ? " (dernier : " + fD(jours[jours.length - 1]) + ")" : "") + "</div><span class=\"grow\"></span>" +
     '<button type="button" class="btn small' + (S.f.gePtDet ? " primary" : "") + '" data-act="ge-ptdet">' + (S.f.gePtDet ? "Masquer" : "Afficher") + " le détail jour par jour</button></div>";
