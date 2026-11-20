@@ -1915,6 +1915,9 @@ function geVirt() { const k = GE.pt.length + "|" + GE.eng.length + "|" + GE.mois
         cpt_debut: rp && N(rp.cpt_fin) > 0 ? N(rp.cpt_fin) : first, cpt_fin: K.vals.length ? K.vals[K.vals.length - 1] : null, cpt_changes: K.changes.length ? K.changes : null, proch_vidange: null, der_vidange: null, date_vidange: null, etats: et.map(o => [o.e, o.c]) }); } }
   return GE_V = { k, m, e }; }
 const GM = () => GE.mois.concat(geVirt().m), GEN = () => GE.eng.concat(geVirt().e), geIsVirt = mm => geVirt().m.some(x => x.mois === mm);
+/* taux d'indisponibilité = Σ jours d'arrêt (panne) ÷ (nombre d'engins × nombre de jours de la période ; jours à venir exclus) */
+const geJours = per => per.reduce((t, p) => { const f = p.fin < today() ? p.fin : today(); return t + Math.max(0, Math.round((Date.parse(f) - Date.parse(p.debut)) / 864e5) + 1); }, 0);
+const geIndisp = (P, n, j) => n && j ? N(P) / (n * j) : null;
 /* compteurs d'un mois de pointage (26 → 25) à partir des compteurs saisis (Saisie compteur), avant le reporting */
 function gePtMois() { const list = [...new Set(GE.pt.map(t => moisPt(t.date)))].sort().reverse(); if (!list.length) return { list, rows: [] };
   const key = list.includes(S.f.gePtM) ? S.f.gePtM : list[0], P = perMois(key), fin = P.d2 < today() ? P.d2 : today(), prev = decMois(key, -1);
@@ -2030,9 +2033,10 @@ VIEWS.gengins = { title: "Gestion engins",
     if (!GE.loaded) { if (!GE.loading) geLoad(); return '<div class="empty">Chargement des reportings…</div>'; }
     if (!GM().length) return '<div class="empty">Aucun reporting importé.<br>Cliquez « + Ajouter reporting » et choisissez le fichier CANEVAS POINTAGE du mois.</div>';
     const ml = geSel(), per = ml.map(m => GM().find(x => x.mois === m)), d1 = per[0].debut, d2 = per[per.length - 1].fin, rows = GEN().filter(r => ml.includes(r.mois)), pans = gePannes(ml), A = geAgg(rows, pans), V = geVidanges(ml);
-    const codes = new Set(rows.map(r => r.code));
+    const codes = new Set(rows.map(r => r.code)), jPer = geJours(per);
     let h = '<div class="more">Période : <b>' + (ml.length > 1 ? moisTxt(ml[0]) + " → " + moisTxt(ml[ml.length - 1]) + " (cumul de " + ml.length + " mois)" : moisTxt(ml[0])) + "</b> · du " + fD(d1) + " au " + fD(d2) + " · " + codes.size + " engins" + (ml.some(geIsVirt) ? ' · <span class="pill p-warn" title="Pas encore de reporting : calcul d\'après les compteurs et états saisis (Saisie compteur), jours non pointés exclus">' + ml.filter(geIsVirt).map(moisTxt).join(", ") + " : d'après les pointages saisis</span>" : "") + "</div>";
     h += '<div class="kpis">' + kpi("Taux de disponibilité", pct(A.dispo), A.dispo !== null && A.dispo < .85 ? "warn" : "") + kpi("Taux d'exploitation", pct(A.expl), "acc") + kpi("Taux de panne", pct(A.panne), A.panne > .1 ? "crit" : "") +
+      (Ti => '<span title="Σ jours d\'arrêt (panne) ÷ (nombre d\'engins × nombre de jours de la période) · ' + nb(A.P) + " j ÷ (" + codes.size + " × " + jPer + " j)" + '">' + kpi("Taux d'indisponibilité", pct(Ti), Ti > .1 ? "crit" : "") + "</span>")(geIndisp(A.P, codes.size, jPer)) +
       kpi("MTBF (engins à heures)", A.mtbf ? nb(Math.round(A.mtbf)) + " h" : "–", "txt") + kpi("MTTR", A.mttr === null ? "–" : nb(Math.round(A.mttr * 10) / 10) + " j", "txt") + kpi("Pannes déclarées", nb(A.np), A.np ? "crit" : "") +
       kpi("Heures de marche", nb(Math.round(A.hm)) + " h", "txt") + (A.km ? kpi("Km parcourus (véhicules)", nb(Math.round(A.km)) + " km", "txt") : "") + kpi("Vidanges réalisées", nb(V.list.length)) + "</div>";
     const PL = gePlanning(), PB = gePreventif(ml), PD = geHuileH(ml, rows), nRet = PL.filter(o => o.etat === "retard").length, n7 = PL.filter(o => o.etat === "j7").length, suiv = PL.filter(o => o.etat !== "inconnu");
@@ -2057,7 +2061,7 @@ VIEWS.gengins = { title: "Gestion engins",
       ["prev", "Réalisation du préventif", PB.taux === null ? "à calculer" : pct(PB.taux), () => gePreventifHtml(PB, PL)],
       ["hh", "Huile par heure de marche", PD.r === null ? "à calculer" : nb(Math.round(PD.r * 10) / 10) + " L/100 h", () => geHuileHtml(PD)],
       ["fam", "Taux par famille d'engins", fams.length + " familles", () => geLegend() + table([{ h: "Famille", f: a => '<a href="#" data-act="ge-fam-go" data-id="' + esc(a.fam) + '"><b>' + esc(a.fam) + "</b></a>" }, { h: "Engins", n: 1, f: a => nb(a.n) }, { h: "Répartition des jours", f: a => geStack(a) },
-        { h: "Disponibilité", n: 1, f: a => '<b class="' + (a.dispo !== null && a.dispo < .85 ? "reste" : "") + '">' + pct(a.dispo) + "</b>" }, { h: "Exploitation", n: 1, f: a => pct(a.expl) }, { h: "Panne", n: 1, f: a => a.panne ? '<span class="' + (a.panne > .1 ? "reste" : "") + '">' + pct(a.panne) + "</span>" : "0 %" },
+        { h: "Disponibilité", n: 1, f: a => '<b class="' + (a.dispo !== null && a.dispo < .85 ? "reste" : "") + '">' + pct(a.dispo) + "</b>" }, { h: "Exploitation", n: 1, f: a => pct(a.expl) }, { h: "Panne", n: 1, f: a => a.panne ? '<span class="' + (a.panne > .1 ? "reste" : "") + '">' + pct(a.panne) + "</span>" : "0 %" }, { h: "Indisponibilité", n: 1, f: a => { const t = geIndisp(a.P, a.n, jPer); return t ? '<span class="' + (t > .1 ? "reste" : "") + '">' + pct(t) + "</span>" : "0 %"; } },
         { h: "Heures / km", n: 1, f: a => (a.hm ? nb(Math.round(a.hm)) + " h" : "") + (a.hm && a.km ? "<br>" : "") + (a.km ? nb(Math.round(a.km)) + " km" : "") || "0" }, { h: "Pannes", n: 1, f: a => nb(a.np) }, { h: "MTBF", n: 1, f: a => geMtbf(a) === "–" ? '<span class="muted">–</span>' : geMtbf(a) }, { h: "MTTR (j)", n: 1, f: a => a.mttr === null ? '<span class="muted">–</span>' : nb(Math.round(a.mttr * 10) / 10) },
         { h: "Vidanges", n: 1, f: a => nb(a.vid) }], fams, { limit: 200 })],
       ["imm", "Engins les plus immobilisés", "jours de panne · top 10", () => { const topP = [...codes].map(c => { const R = rows.filter(r => r.code === c); return { c, v: R.reduce((t, r) => t + N(r.j_panne), 0), d: (R[0] || {}).designation }; }).filter(x => x.v > 0).sort((a, b) => b.v - a.v).slice(0, 10);
